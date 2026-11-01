@@ -1,0 +1,23 @@
+﻿@* MainLayout.razor — struttura comune a tutte le pagine: menu a sinistra, contenuto a destra.
+   Lo stile (colori, posizioni) è in MainLayout.razor.css, che vale solo per questo componente. *@
+
+@* Eredita da LayoutComponentBase: è ciò che rende questo componente un "layout" con @Body. *@
+@inherits LayoutComponentBase
+<div class="page">
+    @* Barra laterale con il menu di navigazione (Layout/NavMenu.razor). *@
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        @* Barra in alto: per ora contiene solo il link "About" del template. *@
+        <div class="top-row px-4">
+            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+        </div>
+
+        @* @Body = qui viene inserita la pagina corrente (Home, Counter, ...). *@
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>

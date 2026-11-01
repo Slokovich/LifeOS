@@ -1,0 +1,23 @@
+﻿@* App.razor — componente principale del frontend.
+   Contiene il Router: guarda l'indirizzo nel browser (es. /counter) e mostra la pagina
+   che ha la direttiva @page corrispondente. *@
+
+@* AppAssembly: dove cercare le pagine (in questo progetto). *@
+<Router AppAssembly="@typeof(App).Assembly">
+
+    @* Caso 1: esiste una pagina per l'indirizzo richiesto. *@
+    <Found Context="routeData">
+        @* Mostra la pagina dentro il layout comune (MainLayout: menu laterale + contenuto). *@
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        @* Dopo ogni cambio pagina sposta il focus sul primo <h1> (accessibilità: lettori di schermo). *@
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+
+    @* Caso 2: nessuna pagina corrisponde all'indirizzo → messaggio "pagina non trovata". *@
+    <NotFound>
+        <PageTitle>Not found</PageTitle>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <p role="alert">Sorry, there's nothing at this address.</p>
+        </LayoutView>
+    </NotFound>
+</Router>

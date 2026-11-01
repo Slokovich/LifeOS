@@ -1,0 +1,13 @@
+﻿@* _Imports.razor — "using" condivisi: valgono automaticamente per TUTTI i file .razor
+   di questa cartella e delle sottocartelle, così non vanno ripetuti in ogni pagina. *@
+
+@using System.Net.Http                                 @* HttpClient: richieste HTTP *@
+@using System.Net.Http.Json                            @* GetFromJsonAsync & co.: richieste che leggono/scrivono JSON *@
+@using Microsoft.AspNetCore.Components.Forms           @* moduli: EditForm, InputText, validazione *@
+@using Microsoft.AspNetCore.Components.Routing         @* navigazione: NavLink, Router *@
+@using Microsoft.AspNetCore.Components.Web             @* eventi del browser: @onclick, PageTitle, HeadOutlet *@
+@using Microsoft.AspNetCore.Components.Web.Virtualization @* Virtualize: liste lunghe disegnate a pezzi *@
+@using Microsoft.AspNetCore.Components.WebAssembly.Http @* opzioni avanzate per le richieste HTTP dal browser *@
+@using Microsoft.JSInterop                             @* chiamare JavaScript da C# e viceversa *@
+@using LifeOS.Web                                      @* classi del progetto (App, ...) *@
+@using LifeOS.Web.Layout                               @* componenti di layout (MainLayout, NavMenu) *@

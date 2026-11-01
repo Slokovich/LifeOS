@@ -1,0 +1,70 @@
+﻿@* Weather.razor — pagina DEMO del template (da eliminare, vedi CLAUDE.md §9 punto 5).
+   Mostra come caricare dati JSON e visualizzarli in una tabella.
+   Nota: legge il file statico wwwroot/sample-data/weather.json, NON l'endpoint dell'API. *@
+
+@* Questa pagina si apre all'indirizzo /weather. *@
+@page "/weather"
+@* Chiede a Blazor l'HttpClient registrato in Program.cs e lo chiama "Http". *@
+@inject HttpClient Http
+
+<PageTitle>Weather</PageTitle>
+
+<h1>Weather</h1>
+
+<p>This component demonstrates fetching data from the server.</p>
+
+@* Finché i dati non sono arrivati (forecasts è null) mostra "Loading...". *@
+@if (forecasts == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    @* Tabella Bootstrap con una riga per ogni previsione. *@
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th aria-label="Temperature in Celsius">Temp. (C)</th>
+                <th aria-label="Temperature in Farenheit">Temp. (F)</th>
+                <th>Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            @* Ripete la riga <tr> per ogni elemento dell'array. *@
+            @foreach (var forecast in forecasts)
+            {
+                <tr>
+                    <td>@forecast.Date.ToShortDateString()</td>
+                    <td>@forecast.TemperatureC</td>
+                    <td>@forecast.TemperatureF</td>
+                    <td>@forecast.Summary</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    // Dati caricati; null finché la richiesta non è completata.
+    private WeatherForecast[]? forecasts;
+
+    // Eseguito automaticamente all'apertura della pagina: scarica il JSON e lo converte in oggetti C#.
+    protected override async Task OnInitializedAsync()
+    {
+        forecasts = await Http.GetFromJsonAsync<WeatherForecast[]>("sample-data/weather.json");
+    }
+
+    // Struttura di una previsione (deve corrispondere ai campi del JSON).
+    public class WeatherForecast
+    {
+        public DateOnly Date { get; set; }
+
+        public int TemperatureC { get; set; }
+
+        public string? Summary { get; set; }
+
+        // Calcolata da TemperatureC, non presente nel JSON.
+        public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    }
+}
