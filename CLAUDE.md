@@ -4,6 +4,7 @@
 > Claude Code lo legge automaticamente all'inizio di ogni sessione, quindi tutto ciò che è scritto qui diventa "contesto" per l'IA.
 
 **Ultimo aggiornamento:** 2026-11-01
+**Repository GitHub (pubblico):** https://github.com/Slokovich/LifeOS — branch principale `main`
 
 ---
 
@@ -161,6 +162,15 @@ dotnet run --project LifeOS.Web
 
 Backend e frontend sono due programmi separati: per usarli insieme vanno avviati entrambi (due terminali).
 
+### Salvare le modifiche su GitHub
+```bash
+git status                       # cosa è cambiato rispetto all'ultimo salvataggio
+git add -A                       # prepara tutte le modifiche
+git commit -m "Descrizione breve" # crea un "punto di salvataggio" locale
+git push                         # lo carica su GitHub
+```
+La GitHub CLI è in `C:\Program Files\GitHub CLI\gh.exe` (login già fatto come `Slokovich`).
+
 ### Database (prima volta)
 ```bash
 # 1. Installare lo strumento EF Core (una sola volta; attualmente NON installato)
@@ -200,6 +210,48 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 - Il **frontend** non accede mai direttamente al DB né all'IA: passa sempre dall'API.
 - Ogni **agente** riceve strumenti (*tools*) solo per i dati che gli servono (es. l'agente Libri legge solo `Books`).
 - L'**orchestratore** è l'unico punto d'ingresso per le richieste in linguaggio naturale.
+
+### 6.1 Come è fatto il frontend (Blazor WebAssembly)
+
+> **Perché questa sottosezione:** chi apre `LifeOS.Web` trova file HTML e CSS e può pensare che il frontend non sia in Blazor. Qui si spiega perché ci sono e come si combinano.
+
+**Blazor sostituisce JavaScript con C#, non HTML e CSS.** Il browser sa mostrare solo HTML e CSS: qualunque tecnologia web, Blazor compreso, alla fine produce quelli.
+
+| Linguaggio | A cosa serve | In LifeOS |
+|---|---|---|
+| **HTML** | struttura (titoli, pulsanti, tabelle, moduli) | dentro i file `.razor` |
+| **CSS** | aspetto (colori, spazi, disposizione) | `app.css`, file `.razor.css`, Bootstrap |
+| **C#** | logica (clic, dati, chiamate all'API) | dentro i blocchi `@code { }` dei file `.razor` |
+| **JavaScript** | — | **non si scrive**; solo `blazor.webassembly.js` (avvio di Blazor) |
+
+**Come funziona all'avvio**
+1. Il browser scarica `wwwroot/index.html`, un guscio quasi vuoto.
+2. `index.html` carica `_framework/blazor.webassembly.js`, che scarica il runtime .NET e il codice C# compilato (WebAssembly) ed esegue tutto **dentro il browser**.
+3. `Program.cs` inserisce il componente `App` in `<div id="app">`; da lì Blazor disegna e aggiorna la pagina da solo.
+
+**I tipi di file**
+- **`.razor`** — un *componente*: HTML + C# nello stesso file. Se contiene `@page "/indirizzo"` è una **pagina** (in `Pages/`), altrimenti è un pezzo riutilizzabile (es. `NavMenu`, `MainLayout` in `Layout/`). Esempio:
+  ```razor
+  <button @onclick="Aumenta">Clic</button>   @* HTML *@
+  <p>Valore: @valore</p>                      @* @ inserisce un valore C# *@
+  @code {
+      private int valore = 0;                  // C#
+      private void Aumenta() => valore++;      // Blazor ridisegna la pagina da solo
+  }
+  ```
+- **`.razor.css`** — stile *isolato*: vale **solo** per il componente con lo stesso nome (es. `NavMenu.razor.css` → solo `NavMenu.razor`). Blazor li unisce nel file generato `LifeOS.Web.styles.css`.
+- **`wwwroot/css/app.css`** — stile **globale**, vale per tutta l'app.
+- **`wwwroot/index.html`** — pagina ospite: si modifica solo per titolo, lingua, icona o per aggiungere un foglio di stile.
+- **`wwwroot/lib/bootstrap/`** — libreria CSS esterna (pulsanti, tabelle, griglia). Si usa tramite le classi (`class="btn btn-primary"`), **non si modifica**.
+- **`_Imports.razor`** — `@using` validi per tutti i componenti.
+
+**Regole per il frontend**
+- Nuova pagina → `Pages/<Nome>.razor` con `@page "/nome"` + link in `Layout/NavMenu.razor`.
+- Pezzo riutilizzabile in più pagine → componente in una cartella `Components/` (da creare quando serve).
+- Stile di un solo componente → file `<Nome>.razor.css` accanto; stile comune → `app.css`. Prima di scrivere CSS, controlla se basta una classe Bootstrap.
+- Logica complessa o chiamate all'API → non nel `.razor`, ma in una classe di servizio C# (`Services/`, da creare) iniettata con `@inject`.
+- JavaScript solo se indispensabile (es. una libreria esterna senza equivalente .NET), tramite `IJSRuntime`; documentarlo in §8.
+- Il frontend parla **solo** con `LifeOS.Api` via HTTP/JSON, mai direttamente con DB o IA.
 
 ---
 
@@ -277,6 +329,7 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | # | Problema | Soluzione | Data |
 |---|---|---|---|
 | — | Versioni EF Core inserite come `9.*` | Fissate a `9.0.22` | 2026-11-01 |
+| 14 | Credenziali Google salvate come `credentials.json.json` (Windows nasconde l'estensione e ne aggiunge una seconda): la regola `credentials.json` del `.gitignore` non le escludeva e sarebbero finite sul repository pubblico | Aggiunte al `.gitignore` le regole `credentials*.json`, `token*.json`, `client_secret*.json`; verificato con `git check-ignore`. Il file non è mai stato committato | 2026-11-01 |
 | 7 | Nessun repository git e nessun `.gitignore` | `git init` (branch `main`), `.gitignore` standard .NET + esclusione di `*.db`, `*.db-shm`, `*.db-wal`; repository pubblico su GitHub | 2026-11-01 |
 
 ---
@@ -289,6 +342,7 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 - Rispondi all'utente **in italiano**.
 - Dopo ogni modifica al codice esegui `dotnet build LifeOS.sln` e riporta onestamente eventuali errori o avvisi.
 - Non aggiungere segreti in file del progetto; usa user-secrets. **Il repository GitHub è pubblico**: tutto ciò che viene committato è visibile a chiunque, quindi niente chiavi, dati personali o file `.db`.
+- Prima di ogni commit esegui `git status` e verifica che non compaiano file di credenziali (`credentials*.json`, `token*.json`, `client_secret*.json`, `*.db`); se compaiono, fermati e aggiorna il `.gitignore`.
 - Fai commit solo quando l'utente lo chiede; messaggi di commit brevi e in italiano.
 - Non aggiornare pacchetti a una versione maggiore (es. 9 → 10) senza chiedere.
 - Dopo una modifica ai modelli, ricorda di creare la migrazione (o segnala che manca).
@@ -310,3 +364,4 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-01 | Riscritto `CLAUDE.md` come guida completa in italiano. Compilazione: 0 errori, 0 avvisi. |
 | 2026-11-01 | Aggiunti commenti esplicativi in italiano a tutto il codice di `LifeOS.Api` e `LifeOS.Web`; aggiunta in §7 la regola sui commenti obbligatori. |
 | 2026-11-01 | Inizializzato git con `.gitignore`; progetto collegato a un repository **pubblico** su GitHub. |
+| 2026-11-01 | Aggiunta §6.1 sul frontend Blazor (ruolo di HTML/CSS/C#, tipi di file, regole); aggiunti in §5 i comandi git. |
