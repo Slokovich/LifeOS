@@ -6,7 +6,9 @@
 //   4) avvia il server
 
 // "using" rende disponibili classi di altri namespace senza scriverne il nome completo.
+using System.Text.Json.Serialization; // JsonStringEnumConverter: scrive gli enum come parole nel JSON
 using LifeOS.Api.Data;                // contiene LifeOSDbContext (il nostro database)
+using LifeOS.Api.Endpoints;           // contiene MapBookEndpoints (gli endpoint dei libri)
 using Microsoft.EntityFrameworkCore;  // contiene UseSqlite e gli altri strumenti di EF Core
 
 // ─── 1. PREPARAZIONE DEI SERVIZI ────────────────────────────────────────────────
@@ -23,6 +25,21 @@ builder.Services.AddOpenApi();
 // (Data Source=lifeos.db → file SQLite nella cartella del progetto).
 builder.Services.AddDbContext<LifeOSDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("LifeOS")));
+
+// JSON: gli enum (es. ReadingStatus) viaggiano come parole ("Read") e non come numeri (2),
+// in entrambe le direzioni. È coerente con il database, dove sono salvati come testo (CLAUDE.md §8).
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// CORS: per sicurezza il browser blocca le chiamate da un sito a un altro indirizzo.
+// Qui l'API dichiara di fidarsi del frontend LifeOS.Web (stessi indirizzi di launchSettings.json
+// del progetto Web), così il browser permette al frontend di chiamarla.
+// La policy si chiama "Frontend" e viene attivata più sotto con app.UseCors.
+builder.Services.AddCors(options =>
+    options.AddPolicy("Frontend", policy => policy
+        .WithOrigins("http://localhost:5222", "https://localhost:7232") // solo questi siti
+        .AllowAnyHeader()    // qualunque intestazione HTTP (es. Content-Type per il JSON)
+        .AllowAnyMethod())); // GET, POST, PUT, DELETE...
 
 // ─── 2. COSTRUZIONE DELL'APP ────────────────────────────────────────────────────
 // Chiude il cantiere: da qui in poi non si possono più registrare servizi.
@@ -41,36 +58,14 @@ if (app.Environment.IsDevelopment())
 // Nota: avviando col profilo "http" compare un avviso nei log (vedi CLAUDE.md §9, punto 6).
 app.UseHttpsRedirection();
 
-// ─── ENDPOINT DEMO DEL TEMPLATE (da eliminare, vedi CLAUDE.md §9 punto 5) ──────────
-// Elenco di descrizioni del meteo tra cui sceglierne una a caso.
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+// Attiva la policy CORS "Frontend" definita sopra. Va messo prima degli endpoint,
+// altrimenti le loro risposte non riceverebbero le intestazioni CORS.
+app.UseCors("Frontend");
 
-// Risponde a GET /weatherforecast con 5 previsioni inventate (una per ciascuno dei prossimi 5 giorni).
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>   // numeri da 1 a 5 = giorni da oggi
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)), // data: oggi + index giorni
-            Random.Shared.Next(-20, 55),                        // temperatura casuale tra -20 e 54 °C
-            summaries[Random.Shared.Next(summaries.Length)]     // descrizione casuale
-        ))
-        .ToArray();
-    return forecast;  // viene convertito automaticamente in JSON
-})
-.WithName("GetWeatherForecast");  // nome dell'endpoint nella documentazione OpenAPI
+// ─── ENDPOINT ───────────────────────────────────────────────────────────────────
+// Libri: GET e POST su /api/books (definiti in Endpoints/BookEndpoints.cs).
+app.MapBookEndpoints();
 
 // ─── 4. AVVIO ───────────────────────────────────────────────────────────────────
 // Avvia il server e resta in ascolto (http://localhost:5219) finché non premi Ctrl+C.
 app.Run();
-
-// Struttura dei dati restituiti da /weatherforecast (demo del template).
-// "record" = classe compatta pensata per contenere dati.
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    // Temperatura in Fahrenheit calcolata da quella in Celsius.
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

@@ -1,6 +1,15 @@
 @LifeOS.Api_HostAddress = http://localhost:5219
 
-GET {{LifeOS.Api_HostAddress}}/weatherforecast/
+### Elenco dei libri
+GET {{LifeOS.Api_HostAddress}}/api/books
 Accept: application/json
 
-###
+### Aggiunge un libro (Status: ToRead, Reading oppure Read)
+POST {{LifeOS.Api_HostAddress}}/api/books
+Content-Type: application/json
+
+{
+  "title": "Il nome della rosa",
+  "author": "Umberto Eco",
+  "status": "ToRead"
+}

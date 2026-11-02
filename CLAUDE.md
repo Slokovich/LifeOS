@@ -3,7 +3,7 @@
 > **A cosa serve questo file.** È il punto di partenza per chiunque lavori su LifeOS: persone (anche non esperte di programmazione) e assistenti IA (Claude Code, Copilot, ecc.). Spiega cos'è il progetto, com'è organizzato, come avviarlo, quali scelte sono state fatte e quali problemi sono noti.
 > Claude Code lo legge automaticamente all'inizio di ogni sessione, quindi tutto ciò che è scritto qui diventa "contesto" per l'IA.
 
-**Ultimo aggiornamento:** 2026-11-01
+**Ultimo aggiornamento:** 2026-11-02
 **Repository GitHub (pubblico):** https://github.com/Slokovich/LifeOS — branch principale `main`
 
 ---
@@ -94,8 +94,9 @@ LifeOS/
 │   ├── appsettings.Development.json ← configurazione solo in sviluppo
 │   ├── Properties/launchSettings.json ← porte e profili di avvio
 │   ├── Agents/                ← (vuota) un file per agente + orchestratore
+│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books)
 │   ├── Models/                ← classi che rappresentano le tabelle del DB
-│   ├── Data/                  ← LifeOSDbContext (+ in futuro Migrations/)
+│   ├── Data/                  ← LifeOSDbContext + Migrations/ (migrazioni generate da EF: non modificarle a mano)
 │   └── Services/              ← (vuota) integrazioni esterne: Google Calendar, import Goodreads, client Anthropic
 │
 └── LifeOS.Web/                ← FRONTEND (Blazor WebAssembly, ancora template di default)
@@ -103,14 +104,16 @@ LifeOS/
     ├── App.razor              ← router: decide quale pagina mostrare per ogni URL
     ├── _Imports.razor         ← "using" comuni a tutte le pagine
     ├── Layout/                ← struttura della pagina (menu laterale, layout)
-    ├── Pages/                 ← pagine: Home, Counter, Weather (demo del template)
-    └── wwwroot/               ← file statici: index.html, CSS, icone, Bootstrap, dati demo
+    ├── Models/                ← classi dei dati come li vede il frontend (oggi: BookItem)
+    ├── Pages/                 ← pagine: Home (template), Books (/books: elenco e aggiunta libri)
+    └── wwwroot/               ← file statici: index.html, appsettings.json (ApiBaseUrl), CSS, icone, Bootstrap
 ```
 
 `bin/` e `obj/` (in entrambi i progetti) contengono i file generati dalla compilazione: **non vanno modificati né salvati in git**.
 
 ### Dove mettere il codice nuovo
 - Nuovo agente → `LifeOS.Api/Agents/<Nome>Agent.cs`
+- Nuovi endpoint HTTP → `LifeOS.Api/Endpoints/<Area>Endpoints.cs` (metodo `Map<Area>Endpoints` richiamato da `Program.cs`)
 - Nuova tabella → classe in `LifeOS.Api/Models/` + `DbSet` e configurazione in `Data/LifeOSDbContext.cs` + migrazione
 - Integrazione esterna (API, file) → `LifeOS.Api/Services/`
 - Nuova pagina web → `LifeOS.Web/Pages/<Nome>.razor` + link in `Layout/NavMenu.razor`
@@ -139,7 +142,14 @@ Il database è un file SQLite (`lifeos.db`). Il percorso è definito in `appsett
 `?` = campo facoltativo (può essere vuoto).
 
 ### Migrazioni
-Una **migrazione** è uno script generato automaticamente che crea o modifica le tabelle nel DB per farle corrispondere ai modelli. **Al momento non esiste nessuna migrazione, quindi il database non è ancora stato creato** (vedi §9).
+Una **migrazione** è uno script generato automaticamente che crea o modifica le tabelle nel DB per farle corrispondere ai modelli. Migrazioni esistenti (in `LifeOS.Api/Data/Migrations/`):
+
+| Migrazione | Cosa fa |
+|---|---|
+| `20261102133805_InitialCreate` | Crea le 6 tabelle (MealLogs, MenstrualCycles, Books, Friends, Courses, StudySessions) e i relativi indici. |
+
+I file in `Migrations/` sono tre: la migrazione (`..._InitialCreate.cs`), il suo `.Designer.cs` e `LifeOSDbContextModelSnapshot.cs` (fotografia dei modelli, usata da EF per calcolare la differenza alla prossima migrazione). Vanno **committati** su git. Il file `lifeos.db` invece **no** (è già nel `.gitignore`). EF crea anche due tabelle di servizio, `__EFMigrationsHistory` (migrazioni già applicate) e `__EFMigrationsLock` (blocco temporaneo durante l'applicazione).
+Il database è stato creato (`dotnet ef database update`) il 2026-11-02; per ricrearlo da zero basta cancellare `lifeos.db*` (solo con conferma dell'utente, vedi §10) e rieseguire il comando.
 
 ---
 
@@ -173,7 +183,7 @@ La GitHub CLI è in `C:\Program Files\GitHub CLI\gh.exe` (login già fatto come 
 
 ### Database (prima volta)
 ```bash
-# 1. Installare lo strumento EF Core (una sola volta; attualmente NON installato)
+# 1. Installare lo strumento EF Core (una sola volta per PC; già installato su questo PC, versione 9.0.22)
 dotnet tool install --global dotnet-ef --version 9.0.22
 
 # 2. Creare una migrazione dopo ogni modifica ai modelli
@@ -300,6 +310,9 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-01 | `GoodreadsId` unico su `Book` | Permette di reimportare il CSV di Goodreads aggiornando i libri invece di duplicarli. |
 | 2026-11-01 | EF Core fissato a 9.0.22 | Il progetto è su .NET 9; EF Core 10 richiede .NET 10. |
 | 2026-11-01 | Claude Haiku come modello | Veloce ed economico, adatto a molte chiamate brevi tra agenti. |
+| 2026-11-02 | Enum come parole anche nel JSON dell'API (`JsonStringEnumConverter` in `Program.cs`) | Coerenza con il DB e leggibilità (`"Read"` invece di `2`). Nel frontend lo stato è quindi una `string`. |
+| 2026-11-02 | Endpoint in file dedicati (`Endpoints/<Area>Endpoints.cs`) invece che tutti in `Program.cs` | `Program.cs` resta corto e leggibile man mano che le aree crescono. |
+| 2026-11-02 | Indirizzo dell'API in `LifeOS.Web/wwwroot/appsettings.json`, non nel codice | Si cambia (es. in produzione) senza toccare il C#. Non metterci segreti: il file è pubblico, scaricato dal browser. |
 
 ---
 
@@ -311,13 +324,9 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 
 | # | Problema | Effetto | Soluzione proposta |
 |---|---|---|---|
-| 1 | **Database non creato**: nessuna migrazione e `dotnet-ef` non installato. | L'API si avvia, ma qualunque accesso al DB fallisce ("no such table"). | Installare `dotnet-ef` 9.0.22 e creare la migrazione `InitialCreate` (vedi §5). |
 | 2 | **Manca il connettore Anthropic**: `Microsoft.Agents.AI` non include un client per Claude. | Gli agenti non possono ancora chiamare Haiku. | Aggiungere un pacchetto client Anthropic compatibile con `Microsoft.Extensions.AI` (`IChatClient`) e registrarlo in `Program.cs`; chiave via user-secrets. |
-| 3 | **CORS non configurato** nell'API. | Il browser bloccherà le chiamate da `localhost:5222` (Web) a `localhost:5219` (API). | In `Program.cs`: `AddCors` con origine `http://localhost:5222` / `https://localhost:7232` e `app.UseCors(...)`. |
-| 4 | **HttpClient del frontend punta a sé stesso** (`BaseAddress = HostEnvironment.BaseAddress`). | Le chiamate dal frontend vanno al server del frontend, non all'API. | Impostare `BaseAddress` all'URL dell'API, letto da `wwwroot/appsettings.json`. |
-| 5 | **Codice demo del template** ancora presente: endpoint `/weatherforecast` e record `WeatherForecast` in `Program.cs`, `LifeOS.Api.http`, pagine `Counter`/`Weather`, `sample-data/weather.json`. | Confusione, codice inutile. | Rimuoverlo quando si creano i primi endpoint/pagine reali. |
 | 6 | **`UseHttpsRedirection` con profilo `http`**. | Avviso nei log "Failed to determine the https port"; nessun effetto pratico. | Avviare con `--launch-profile https` oppure attivare il redirect solo fuori da Development. |
-| 8 | **Modelli condivisi assenti**: i modelli stanno solo in `LifeOS.Api`. | Il frontend dovrà ridefinire le stesse classi. | Creare un progetto `LifeOS.Shared` per i DTO usati da entrambi. |
+| 8 | **Modelli condivisi assenti**: i modelli stanno solo in `LifeOS.Api`. | Il frontend ridefinisce le stesse classi (già successo con `Web/Models/BookItem`, copia semplificata di `Book`: se cambia `Book`, aggiornarla a mano). | Creare un progetto `LifeOS.Shared` per i DTO usati da entrambi. |
 | 9 | **Modelli mancanti** per alcune funzioni: obiettivo annuale della reading challenge, allenamenti pianificati, sedute dallo psicologo (oggi previste solo da calendario). | Gli agenti non hanno dove salvare questi dati. | Valutare `ReadingChallenge` (anno, obiettivo), `Workout`, eventuale `TherapySession`. |
 | 10 | **Integrazione Google Calendar assente**. | Agenti Sport, Cibo e Sociale non possono leggere gli impegni. | Pacchetto `Google.Apis.Calendar.v3` + OAuth, servizio in `Services/`. |
 | 11 | **Dati sensibili** (ciclo mestruale, salute, terapia) inviati all'API Anthropic. | Questione di privacy. | Inviare all'IA solo i dati minimi necessari (es. "fase del ciclo: follicolare" invece dello storico completo). Non esporre l'API su internet senza autenticazione. |
@@ -328,6 +337,10 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 
 | # | Problema | Soluzione | Data |
 |---|---|---|---|
+| 3 | CORS non configurato nell'API (il browser bloccava le chiamate dal frontend) | `AddCors` con policy `Frontend` (origini `http://localhost:5222` e `https://localhost:7232`) + `app.UseCors("Frontend")` in `Program.cs`. Verificato: l'API risponde con `Access-Control-Allow-Origin`. Se cambiano le porte del Web, aggiornare l'elenco | 2026-11-02 |
+| 4 | `HttpClient` del frontend puntava al frontend stesso | `BaseAddress` ora letto da `wwwroot/appsettings.json` → `ApiBaseUrl` (`http://localhost:5219`); se manca la chiave l'app si ferma con un errore chiaro | 2026-11-02 |
+| 5 | Codice demo del template (endpoint `/weatherforecast`, record `WeatherForecast`, pagine `Counter`/`Weather`, `sample-data/weather.json`, richiesta nel `.http`) | Eliminato; restano solo `Home.razor` (ancora testo del template, vedi #13) e il layout | 2026-11-02 |
+| 1 | Database non creato: nessuna migrazione e `dotnet-ef` non installato (errore "no such table") | Installato `dotnet-ef` 9.0.22, creata la migrazione `InitialCreate` e applicata: `lifeos.db` ora esiste con le 6 tabelle | 2026-11-02 |
 | — | Versioni EF Core inserite come `9.*` | Fissate a `9.0.22` | 2026-11-01 |
 | 14 | Credenziali Google salvate come `credentials.json.json` (Windows nasconde l'estensione e ne aggiunge una seconda): la regola `credentials.json` del `.gitignore` non le escludeva e sarebbero finite sul repository pubblico | Aggiunte al `.gitignore` le regole `credentials*.json`, `token*.json`, `client_secret*.json`; verificato con `git check-ignore`. Il file non è mai stato committato | 2026-11-01 |
 | 7 | Nessun repository git e nessun `.gitignore` | `git init` (branch `main`), `.gitignore` standard .NET + esclusione di `*.db`, `*.db-shm`, `*.db-wal`; repository pubblico su GitHub | 2026-11-01 |
@@ -365,3 +378,5 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-01 | Aggiunti commenti esplicativi in italiano a tutto il codice di `LifeOS.Api` e `LifeOS.Web`; aggiunta in §7 la regola sui commenti obbligatori. |
 | 2026-11-01 | Inizializzato git con `.gitignore`; progetto collegato a un repository **pubblico** su GitHub. |
 | 2026-11-01 | Aggiunta §6.1 sul frontend Blazor (ruolo di HTML/CSS/C#, tipi di file, regole); aggiunti in §5 i comandi git. |
+| 2026-11-02 | Installato `dotnet-ef` 9.0.22; creata e applicata la migrazione `InitialCreate` (cartella `Data/Migrations/`); creato `lifeos.db`. Risolto problema #1. Build: 0 errori, 0 avvisi. |
+| 2026-11-02 | Risolti problemi #3 (CORS) e #4 (`HttpClient`); creati endpoint `GET`/`POST /api/books` (`Endpoints/BookEndpoints.cs`), pagina `Books.razor` (`/books`) con `Models/BookItem.cs`, link "Libri" nel menu; rimosso il codice demo (#5). Verificato: API avviata, `GET /api/books` → 200 con CORS corretto. Build: 0 errori, 0 avvisi. |

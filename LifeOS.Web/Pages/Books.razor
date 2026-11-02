@@ -1,0 +1,138 @@
+@* Books.razor — pagina "Libri": mostra i libri salvati nel database e permette di aggiungerne.
+   I dati arrivano dall'API (GET /api/books) e vengono inviati all'API (POST /api/books):
+   il frontend non tocca mai il database direttamente (CLAUDE.md §6). *@
+
+@* @page "/books" = questa pagina si apre all'indirizzo /books. *@
+@page "/books"
+@using LifeOS.Web.Models
+@* @inject = chiede a Blazor l'HttpClient registrato in Program.cs (già puntato all'API). *@
+@inject HttpClient Http
+
+<PageTitle>Libri</PageTitle>
+
+<h1>Libri</h1>
+
+@* ─── Modulo per aggiungere un libro ─── *@
+<div class="row g-2 mb-4">
+    <div class="col-md-4">
+        @* @bind = collega il campo alla variabile C#: quello che scrivi finisce in newTitle. *@
+        <input class="form-control" placeholder="Titolo" @bind="newTitle" />
+    </div>
+    <div class="col-md-3">
+        <input class="form-control" placeholder="Autore" @bind="newAuthor" />
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" @bind="newStatus">
+            @* value = ciò che viene inviato all'API (parole dell'enum); il testo è quello mostrato. *@
+            <option value="ToRead">Da leggere</option>
+            <option value="Reading">In lettura</option>
+            <option value="Read">Letto</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-primary w-100" @onclick="AddBookAsync">Aggiungi</button>
+    </div>
+</div>
+
+@* Messaggio d'errore (visibile solo se c'è un errore). *@
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@* ─── Elenco dei libri ─── *@
+@if (books is null)
+{
+    @* books è null finché i dati non sono arrivati dall'API. *@
+    <p><em>Caricamento...</em></p>
+}
+else if (books.Count == 0)
+{
+    <p>Nessun libro salvato: aggiungine uno qui sopra.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr><th>Titolo</th><th>Autore</th><th>Stato</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var book in books)
+            {
+                <tr>
+                    <td>@book.Title</td>
+                    <td>@book.Author</td>
+                    <td>@StatusLabel(book.Status)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    // Elenco dei libri ricevuti dall'API (null = non ancora caricato).
+    private List<BookItem>? books;
+
+    // Valori dei campi del modulo.
+    private string newTitle = "";
+    private string newAuthor = "";
+    private string newStatus = "ToRead";
+
+    // Testo dell'ultimo errore, da mostrare all'utente (null = nessun errore).
+    private string? error;
+
+    // Parte automaticamente quando la pagina si apre: carica i libri.
+    protected override async Task OnInitializedAsync() => await LoadBooksAsync();
+
+    // Chiede l'elenco all'API (GET /api/books). L'indirizzo base arriva da wwwroot/appsettings.json.
+    private async Task LoadBooksAsync()
+    {
+        try
+        {
+            books = await Http.GetFromJsonAsync<List<BookItem>>("api/books");
+            error = null;
+        }
+        catch (HttpRequestException)
+        {
+            // Succede se l'API non è avviata o il CORS blocca la richiesta.
+            error = "Impossibile contattare l'API. È avviata (dotnet run --project LifeOS.Api)?";
+            books = [];
+        }
+    }
+
+    // Invia il nuovo libro all'API (POST /api/books) e poi ricarica l'elenco.
+    private async Task AddBookAsync()
+    {
+        // Controllo veloce lato browser; l'API ripete comunque i controlli.
+        if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newAuthor))
+        {
+            error = "Titolo e autore sono obbligatori.";
+            return;
+        }
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/books",
+                new BookItem { Title = newTitle, Author = newAuthor, Status = newStatus });
+            response.EnsureSuccessStatusCode(); // lancia un errore se l'API ha risposto "no"
+
+            // Libro salvato: svuota il modulo e ricarica l'elenco.
+            newTitle = "";
+            newAuthor = "";
+            await LoadBooksAsync();
+        }
+        catch (HttpRequestException)
+        {
+            error = "Salvataggio non riuscito. L'API è avviata?";
+        }
+    }
+
+    // Traduce il valore dell'enum (inglese) nel testo italiano mostrato all'utente.
+    private static string StatusLabel(string status) => status switch
+    {
+        "ToRead" => "Da leggere",
+        "Reading" => "In lettura",
+        "Read" => "Letto",
+        _ => status
+    };
+}

@@ -16,8 +16,12 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 // Registra HttpClient, usato dalle pagine per fare richieste HTTP (@inject HttpClient Http).
-// ATTENZIONE: BaseAddress punta al sito del frontend stesso, non all'API (vedi CLAUDE.md §9 punto 4).
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+// BaseAddress = indirizzo dell'API (LifeOS.Api), letto da wwwroot/appsettings.json (chiave "ApiBaseUrl").
+// Così nelle pagine basta scrivere Http.GetFromJsonAsync("api/books") e la richiesta va all'API.
+// Se la chiave manca, l'app si ferma subito con un messaggio chiaro invece di chiamare l'indirizzo sbagliato.
+var apiBaseUrl = builder.Configuration["ApiBaseUrl"]
+    ?? throw new InvalidOperationException("Manca 'ApiBaseUrl' in wwwroot/appsettings.json");
+builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseUrl) });
 
 // Costruisce l'app e la avvia nel browser.
 await builder.Build().RunAsync();
