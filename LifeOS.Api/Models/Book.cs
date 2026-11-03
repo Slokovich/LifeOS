@@ -33,8 +33,8 @@ public class Book
     /// <summary>Numero di pagine, se noto.</summary>
     public int? Pages { get; set; }
 
-    /// <summary>Voto 0-5 (0 = nessun voto, come in Goodreads).</summary>
-    public int MyRating { get; set; }
+    /// <summary>Voto 0-5, anche con decimali (es. 3.5 o 2.25); 0 = nessun voto, come in Goodreads.</summary>
+    public decimal MyRating { get; set; }
 
     /// <summary>Da leggere, in lettura o letto.</summary>
     public ReadingStatus Status { get; set; }

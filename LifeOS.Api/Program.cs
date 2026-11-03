@@ -9,6 +9,7 @@
 using System.Text.Json.Serialization; // JsonStringEnumConverter: scrive gli enum come parole nel JSON
 using LifeOS.Api.Data;                // contiene LifeOSDbContext (il nostro database)
 using LifeOS.Api.Endpoints;           // contiene MapBookEndpoints (gli endpoint dei libri)
+using LifeOS.Api.Services;            // contiene GoodreadsImportService (import del CSV)
 using Microsoft.EntityFrameworkCore;  // contiene UseSqlite e gli altri strumenti di EF Core
 
 // ─── 1. PREPARAZIONE DEI SERVIZI ────────────────────────────────────────────────
@@ -25,6 +26,10 @@ builder.Services.AddOpenApi();
 // (Data Source=lifeos.db → file SQLite nella cartella del progetto).
 builder.Services.AddDbContext<LifeOSDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("LifeOS")));
+
+// Servizio che importa il CSV di Goodreads. "Scoped" = ne viene creato uno per ogni richiesta,
+// come il database che usa.
+builder.Services.AddScoped<GoodreadsImportService>();
 
 // JSON: gli enum (es. ReadingStatus) viaggiano come parole ("Read") e non come numeri (2),
 // in entrambe le direzioni. È coerente con il database, dove sono salvati come testo (CLAUDE.md §8).
@@ -63,7 +68,7 @@ app.UseHttpsRedirection();
 app.UseCors("Frontend");
 
 // ─── ENDPOINT ───────────────────────────────────────────────────────────────────
-// Libri: GET e POST su /api/books (definiti in Endpoints/BookEndpoints.cs).
+// Libri: GET, POST e import CSV su /api/books (definiti in Endpoints/BookEndpoints.cs).
 app.MapBookEndpoints();
 
 // ─── 4. AVVIO ───────────────────────────────────────────────────────────────────

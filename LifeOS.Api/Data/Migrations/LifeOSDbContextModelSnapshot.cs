@@ -40,8 +40,8 @@ namespace LifeOS.Api.Data.Migrations
                     b.Property<string>("Isbn13")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("MyRating")
-                        .HasColumnType("INTEGER");
+                    b.Property<decimal>("MyRating")
+                        .HasColumnType("TEXT");
 
                     b.Property<int?>("Pages")
                         .HasColumnType("INTEGER");

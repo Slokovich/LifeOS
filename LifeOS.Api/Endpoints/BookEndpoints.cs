@@ -1,6 +1,7 @@
 // Il namespace corrisponde alla cartella LifeOS.Api/Endpoints.
 using LifeOS.Api.Data;    // LifeOSDbContext (il database)
 using LifeOS.Api.Models;  // Book, ReadingStatus
+using LifeOS.Api.Services; // GoodreadsImportService (import del CSV)
 using Microsoft.EntityFrameworkCore; // ToListAsync e altri strumenti di EF Core
 
 namespace LifeOS.Api.Endpoints;
@@ -41,5 +42,29 @@ public static class BookEndpoints
             // 201 Created: risponde con il libro salvato (ora con il suo Id) e il suo indirizzo.
             return Results.Created($"/api/books/{book.Id}", book);
         });
+
+        // POST /api/books/import → riceve il file CSV esportato da Goodreads e importa i libri.
+        // Il file arriva come modulo "multipart/form-data" nel campo chiamato "file".
+        // DisableAntiforgery: la protezione antiforgery serve per i moduli con cookie di login;
+        // questa API non usa cookie e accetta richieste solo dal frontend (CORS), quindi la disattiviamo.
+        group.MapPost("/import", async (IFormFile file, GoodreadsImportService importer) =>
+        {
+            if (file.Length == 0)
+                return Results.BadRequest("Il file è vuoto.");
+            if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest("Serve un file .csv esportato da Goodreads.");
+
+            await using var stream = file.OpenReadStream();
+            try
+            {
+                // Risponde con il riepilogo: quanti libri aggiunti, aggiornati, saltati.
+                return Results.Ok(await importer.ImportAsync(stream));
+            }
+            catch (CsvHelper.CsvHelperException)
+            {
+                // Il file non è un CSV leggibile (es. un altro tipo di file rinominato .csv).
+                return Results.BadRequest("Il file non sembra un CSV valido di Goodreads.");
+            }
+        }).DisableAntiforgery();
     }
 }

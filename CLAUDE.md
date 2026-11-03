@@ -3,7 +3,7 @@
 > **A cosa serve questo file.** È il punto di partenza per chiunque lavori su LifeOS: persone (anche non esperte di programmazione) e assistenti IA (Claude Code, Copilot, ecc.). Spiega cos'è il progetto, com'è organizzato, come avviarlo, quali scelte sono state fatte e quali problemi sono noti.
 > Claude Code lo legge automaticamente all'inizio di ogni sessione, quindi tutto ciò che è scritto qui diventa "contesto" per l'IA.
 
-**Ultimo aggiornamento:** 2026-11-02
+**Ultimo aggiornamento:** 2026-11-03 (sera)
 **Repository GitHub (pubblico):** https://github.com/Slokovich/LifeOS — branch principale `main`
 
 ---
@@ -70,6 +70,7 @@ LifeOS è un'**app personale** che aiuta a organizzare la vita quotidiana (sport
 | Accesso al DB | Entity Framework Core | 9.0.22 | `Microsoft.EntityFrameworkCore.Sqlite` + `.Design` |
 | Agenti | Microsoft Agent Framework | 1.27.0 | pacchetto `Microsoft.Agents.AI` |
 | Modello IA | Anthropic API, Claude Haiku | — | **connettore non ancora aggiunto** (vedi §9) |
+| Lettura CSV | CsvHelper | 33.0.1 | usato da `GoodreadsImportService` per leggere l'export di Goodreads |
 | Documentazione API | OpenAPI | 9.0.22 | disponibile su `/openapi/v1.json` in Development |
 | UI | Bootstrap | (incluso in `wwwroot/lib`) | template di default |
 
@@ -94,18 +95,18 @@ LifeOS/
 │   ├── appsettings.Development.json ← configurazione solo in sviluppo
 │   ├── Properties/launchSettings.json ← porte e profili di avvio
 │   ├── Agents/                ← (vuota) un file per agente + orchestratore
-│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books)
+│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books e /api/books/import)
 │   ├── Models/                ← classi che rappresentano le tabelle del DB
 │   ├── Data/                  ← LifeOSDbContext + Migrations/ (migrazioni generate da EF: non modificarle a mano)
-│   └── Services/              ← (vuota) integrazioni esterne: Google Calendar, import Goodreads, client Anthropic
+│   └── Services/              ← integrazioni esterne (oggi: GoodreadsImportService.cs = import CSV); in futuro Google Calendar, client Anthropic
 │
 └── LifeOS.Web/                ← FRONTEND (Blazor WebAssembly, ancora template di default)
     ├── Program.cs             ← avvio dell'app nel browser, registra HttpClient
     ├── App.razor              ← router: decide quale pagina mostrare per ogni URL
     ├── _Imports.razor         ← "using" comuni a tutte le pagine
     ├── Layout/                ← struttura della pagina (menu laterale, layout)
-    ├── Models/                ← classi dei dati come li vede il frontend (oggi: BookItem)
-    ├── Pages/                 ← pagine: Home (template), Books (/books: elenco e aggiunta libri)
+    ├── Models/                ← classi dei dati come li vede il frontend (oggi: BookItem, ImportResultItem)
+    ├── Pages/                 ← pagine: Home (template), Books (/books: elenco, aggiunta libri e import CSV Goodreads)
     └── wwwroot/               ← file statici: index.html, appsettings.json (ApiBaseUrl), CSS, icone, Bootstrap
 ```
 
@@ -134,7 +135,7 @@ Il database è un file SQLite (`lifeos.db`). Il percorso è definito in `appsett
 |---|---|---|---|---|
 | `MealLog` | `MealLogs` | Cibo | `EatenAt`, `Type` (Breakfast/Lunch/Dinner/Snack), `Description` (max 500), `Calories?`, `Notes?` | indice su `EatenAt` |
 | `MenstrualCycle` | `MenstrualCycles` | Sport | `StartDate`, `PeriodEndDate?`, `CycleLengthDays?`, `Notes?` | `StartDate` unico; un record = un ciclo |
-| `Book` | `Books` | Libri | `GoodreadsId?`, `Title`, `Author`, `Isbn13?`, `Pages?`, `MyRating` (0–5), `Status` (ToRead/Reading/Read), `DateAdded?`, `DateRead?` | `GoodreadsId` unico → evita duplicati reimportando il CSV |
+| `Book` | `Books` | Libri | `GoodreadsId?`, `Title`, `Author`, `Isbn13?`, `Pages?`, `MyRating` (`decimal` 0–5, anche 3.5 o 2.25), `Status` (ToRead/Reading/Read), `DateAdded?`, `DateRead?` | `GoodreadsId` unico → evita duplicati reimportando il CSV |
 | `Friend` | `Friends` | Sociale | `Name`, `LastSeen?`, `DesiredFrequencyDays?`, `Interests?`, `Notes?` | |
 | `Course` | `Courses` | Apprendimento | `Title`, `Topic`, `Platform`, `TotalHours`, `IsCompleted` | ha molte `StudySession` |
 | `StudySession` | `StudySessions` | Apprendimento | `CourseId`, `ScheduledStart`, `PlannedMinutes`, `ActualMinutes?`, `IsCompleted`, `Notes?` | eliminando un corso si eliminano le sue sessioni (cascade) |
@@ -147,6 +148,7 @@ Una **migrazione** è uno script generato automaticamente che crea o modifica le
 | Migrazione | Cosa fa |
 |---|---|
 | `20261102133805_InitialCreate` | Crea le 6 tabelle (MealLogs, MenstrualCycles, Books, Friends, Courses, StudySessions) e i relativi indici. |
+| `MakeBookRatingDecimal` | Cambia `Books.MyRating` da intero a `decimal` (in SQLite è salvato come testo). Applicata il 2026-11-03. |
 
 I file in `Migrations/` sono tre: la migrazione (`..._InitialCreate.cs`), il suo `.Designer.cs` e `LifeOSDbContextModelSnapshot.cs` (fotografia dei modelli, usata da EF per calcolare la differenza alla prossima migrazione). Vanno **committati** su git. Il file `lifeos.db` invece **no** (è già nel `.gitignore`). EF crea anche due tabelle di servizio, `__EFMigrationsHistory` (migrazioni già applicate) e `__EFMigrationsLock` (blocco temporaneo durante l'applicazione).
 Il database è stato creato (`dotnet ef database update`) il 2026-11-02; per ricrearlo da zero basta cancellare `lifeos.db*` (solo con conferma dell'utente, vedi §10) e rieseguire il comando.
@@ -312,6 +314,9 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-01 | Claude Haiku come modello | Veloce ed economico, adatto a molte chiamate brevi tra agenti. |
 | 2026-11-02 | Enum come parole anche nel JSON dell'API (`JsonStringEnumConverter` in `Program.cs`) | Coerenza con il DB e leggibilità (`"Read"` invece di `2`). Nel frontend lo stato è quindi una `string`. |
 | 2026-11-02 | Endpoint in file dedicati (`Endpoints/<Area>Endpoints.cs`) invece che tutti in `Program.cs` | `Program.cs` resta corto e leggibile man mano che le aree crescono. |
+| 2026-11-03 | Import Goodreads con la libreria CsvHelper invece di un lettore CSV scritto a mano | Il CSV di Goodreads ha campi tra virgolette con virgole e a capo (es. recensioni): un `Split(',')` li romperebbe. |
+| 2026-11-03 | `Book.MyRating` come `decimal` e non `int` | Nel CSV di Goodreads i voti hanno mezze stelle e decimali (3.5, 2.25): con un intero si perdevano. Attenzione: SQLite salva i `decimal` come testo, quindi `Sum`/`Average` sui voti non si possono fare nella query EF (vanno calcolati in memoria dopo `ToListAsync()`). |
+| 2026-11-03 | `.DisableAntiforgery()` su `POST /api/books/import` | .NET richiede un token antiforgery per i moduli con file; qui non servono perché l'API non usa cookie di login e accetta solo il frontend (CORS). Da rivedere se si aggiunge l'autenticazione. |
 | 2026-11-02 | Indirizzo dell'API in `LifeOS.Web/wwwroot/appsettings.json`, non nel codice | Si cambia (es. in produzione) senza toccare il C#. Non metterci segreti: il file è pubblico, scaricato dal browser. |
 
 ---
@@ -379,4 +384,7 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-01 | Inizializzato git con `.gitignore`; progetto collegato a un repository **pubblico** su GitHub. |
 | 2026-11-01 | Aggiunta §6.1 sul frontend Blazor (ruolo di HTML/CSS/C#, tipi di file, regole); aggiunti in §5 i comandi git. |
 | 2026-11-02 | Installato `dotnet-ef` 9.0.22; creata e applicata la migrazione `InitialCreate` (cartella `Data/Migrations/`); creato `lifeos.db`. Risolto problema #1. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Aggiunti pacchetto CsvHelper 33.0.1, `Services/GoodreadsImportService.cs` e endpoint `POST /api/books/import` (riceve il CSV, aggiunge/aggiorna i libri per `GoodreadsId`, risponde con aggiunti/aggiornati/saltati). Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Provato l'import con il CSV reale: 619 libri (DB: 620 con un libro inserito a mano). Bug trovato e corretto: i voti decimali del CSV (`3.5`) erano letti come interi e finivano a 0. `MyRating` ora `decimal`, migrazione `MakeBookRatingDecimal` applicata, CSV reimportato (253 libri con voto). Un secondo import non crea duplicati. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Aggiunto in `/books` il selettore "Importa da Goodreads" (`InputFile`, limite 10 MB) che invia il CSV a `POST /api/books/import` e mostra il riepilogo; nuovo `Web/Models/ImportResultItem.cs` (copia di `ImportResult` dell'API: se cambia, aggiornarla a mano, vedi #8). Build: 0 errori, 0 avvisi. **Non ancora provato nel browser.** |
 | 2026-11-02 | Risolti problemi #3 (CORS) e #4 (`HttpClient`); creati endpoint `GET`/`POST /api/books` (`Endpoints/BookEndpoints.cs`), pagina `Books.razor` (`/books`) con `Models/BookItem.cs`, link "Libri" nel menu; rimosso il codice demo (#5). Verificato: API avviata, `GET /api/books` → 200 con CORS corretto. Build: 0 errori, 0 avvisi. |

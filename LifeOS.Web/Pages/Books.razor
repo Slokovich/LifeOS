@@ -1,5 +1,6 @@
 @* Books.razor — pagina "Libri": mostra i libri salvati nel database e permette di aggiungerne.
-   I dati arrivano dall'API (GET /api/books) e vengono inviati all'API (POST /api/books):
+   I dati arrivano dall'API (GET /api/books) e vengono inviati all'API (POST /api/books,
+   e POST /api/books/import per il CSV di Goodreads):
    il frontend non tocca mai il database direttamente (CLAUDE.md §6). *@
 
 @* @page "/books" = questa pagina si apre all'indirizzo /books. *@
@@ -32,6 +33,24 @@
     <div class="col-md-2">
         <button class="btn btn-primary w-100" @onclick="AddBookAsync">Aggiungi</button>
     </div>
+</div>
+
+@* ─── Import del CSV di Goodreads ─── *@
+<div class="mb-4">
+    <label class="form-label">Importa da Goodreads (file .csv esportato dal sito)</label>
+    @* InputFile = componente di Blazor che apre la scelta del file; OnChange parte appena ne scegli uno. *@
+    <InputFile class="form-control" accept=".csv" OnChange="ImportCsvAsync" disabled="@importing" />
+    @if (importing)
+    {
+        <div class="form-text">Importazione in corso...</div>
+    }
+    @if (importResult is not null)
+    {
+        <div class="alert alert-success mt-2">
+            Import completato: @importResult.Added aggiunti, @importResult.Updated aggiornati,
+            @importResult.Skipped saltati.
+        </div>
+    }
 </div>
 
 @* Messaggio d'errore (visibile solo se c'è un errore). *@
@@ -124,6 +143,52 @@ else
         catch (HttpRequestException)
         {
             error = "Salvataggio non riuscito. L'API è avviata?";
+        }
+    }
+
+    // Dimensione massima accettata per il CSV (Blazor di default si ferma a 500 KB): 10 MB.
+    private const long MaxCsvBytes = 10 * 1024 * 1024;
+
+    // Riepilogo dell'ultimo import (null = nessun import fatto) e flag "import in corso".
+    private ImportResultItem? importResult;
+    private bool importing;
+
+    // Parte quando scegli un file: lo invia all'API (POST /api/books/import) e ricarica l'elenco.
+    private async Task ImportCsvAsync(InputFileChangeEventArgs e)
+    {
+        importing = true;
+        importResult = null;
+        error = null;
+        try
+        {
+            // Un modulo "multipart/form-data" con il file nel campo "file" (il nome atteso dall'API).
+            using var content = new MultipartFormDataContent();
+            using var stream = e.File.OpenReadStream(MaxCsvBytes);
+            content.Add(new StreamContent(stream), "file", e.File.Name);
+
+            var response = await Http.PostAsync("api/books/import", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                // L'API spiega il motivo nel corpo della risposta (es. "Il file è vuoto.").
+                error = $"Import non riuscito: {await response.Content.ReadAsStringAsync()}";
+                return;
+            }
+
+            importResult = await response.Content.ReadFromJsonAsync<ImportResultItem>();
+            await LoadBooksAsync(); // mostra subito i libri importati
+        }
+        catch (HttpRequestException)
+        {
+            error = "Import non riuscito. L'API è avviata?";
+        }
+        catch (IOException)
+        {
+            // Succede se il file supera MaxCsvBytes.
+            error = "File troppo grande (massimo 10 MB).";
+        }
+        finally
+        {
+            importing = false;
         }
     }
 
