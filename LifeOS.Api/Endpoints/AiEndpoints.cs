@@ -1,3 +1,4 @@
+using LifeOS.Api.Agents;       // BookAgent
 using Microsoft.Extensions.AI; // IChatClient: l'interfaccia standard per "parlare" con un modello IA
 
 namespace LifeOS.Api.Endpoints;
@@ -13,6 +14,23 @@ public static class AiEndpoints
         // GET /api/ping-ai → PROVA TEMPORANEA: manda a Claude una domanda brevissima e restituisce
         // la risposta, per verificare che chiave, modello e connessione funzionino.
         // Da eliminare quando il primo agente è operativo.
+        // GET /api/agents/books?question=... → fa una domanda all'agente Libri.
+        // È un GET (e non un POST) solo per poterlo provare dalla barra del browser; sarà
+        // sostituito dall'orchestratore e da una pagina di chat. Ogni chiamata costa pochi centesimi.
+        app.MapGet("/api/agents/books", async (string question, BookAgent agent) =>
+        {
+            if (string.IsNullOrWhiteSpace(question))
+                return Results.BadRequest("Scrivi una domanda (parametro 'question').");
+            try
+            {
+                return Results.Ok(new { answer = await agent.AskAsync(question) });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"{ex.GetType().Name}: {ex.Message}");
+            }
+        });
+
         app.MapGet("/api/ping-ai", async (IChatClient chat) =>
         {
             try

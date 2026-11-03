@@ -7,6 +7,7 @@
 
 // "using" rende disponibili classi di altri namespace senza scriverne il nome completo.
 using System.Text.Json.Serialization; // JsonStringEnumConverter: scrive gli enum come parole nel JSON
+using LifeOS.Api.Agents;              // contiene BookAgent (l'agente Libri)
 using LifeOS.Api.Data;                // contiene LifeOSDbContext (il nostro database)
 using LifeOS.Api.Endpoints;           // contiene MapBookEndpoints (gli endpoint dei libri)
 using LifeOS.Api.Services;            // contiene GoodreadsImportService (import del CSV)
@@ -47,6 +48,9 @@ builder.Services.AddSingleton<IChatClient>(_ =>
     // AsIChatClient adatta il client Anthropic all'interfaccia standard IChatClient.
     return new AnthropicClient { ApiKey = apiKey }.AsIChatClient(model);
 });
+
+// Agente Libri (Agents/BookAgent.cs). "Scoped" come il database che usa: uno per richiesta.
+builder.Services.AddScoped<BookAgent>();
 
 // JSON: gli enum (es. ReadingStatus) viaggiano come parole ("Read") e non come numeri (2),
 // in entrambe le direzioni. È coerente con il database, dove sono salvati come testo (CLAUDE.md §8).

@@ -51,7 +51,7 @@ LifeOS è un'**app personale** che aiuta a organizzare la vita quotidiana (sport
 | **Orchestratore** | tutti gli agenti | Riceve la richiesta, la smista agli agenti giusti, combina le risposte | da fare |
 | **Sport** | Google Calendar, `MenstrualCycle` | Pianifica allenamenti in base a impegni e fase del ciclo | da fare |
 | **Cibo** | `MealLog`, impegni del calendario | Suggerisce cosa mangiare evitando ripetizioni e tenendo conto della giornata | da fare |
-| **Libri** | `Book` (import CSV Goodreads) | Gestisce la reading challenge annuale | da fare |
+| **Libri** | `Book` (import CSV Goodreads) | Gestisce la reading challenge annuale | **prima versione funzionante**: risponde a domande su libri letti per anno e per stato; manca l'obiettivo annuale (#9) |
 | **Sociale** | Google Calendar, `Friend` | Ricorda le sedute dallo psicologo, suggerisce uscite con gli amici | da fare |
 | **Apprendimento** | `Course`, `StudySession` | Pianifica il tempo di studio nei corsi | da fare |
 
@@ -94,8 +94,8 @@ LifeOS/
 │   ├── appsettings.json       ← configurazione (stringa di connessione, log)
 │   ├── appsettings.Development.json ← configurazione solo in sviluppo
 │   ├── Properties/launchSettings.json ← porte e profili di avvio
-│   ├── Agents/                ← (vuota) un file per agente + orchestratore
-│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books e /api/books/import; AiEndpoints.cs → /api/ping-ai, prova temporanea da eliminare)
+│   ├── Agents/                ← un file per agente + orchestratore (oggi: BookAgent.cs e i suoi strumenti BookTools.cs)
+│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books e /api/books/import; AiEndpoints.cs → /api/agents/books?question=... e /api/ping-ai, quest'ultimo è una prova temporanea da eliminare)
 │   ├── Models/                ← classi che rappresentano le tabelle del DB
 │   ├── Data/                  ← LifeOSDbContext + Migrations/ (migrazioni generate da EF: non modificarle a mano)
 │   └── Services/              ← integrazioni esterne (oggi: GoodreadsImportService.cs = import CSV); in futuro Google Calendar, client Anthropic
@@ -329,7 +329,7 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 
 | # | Problema | Effetto | Soluzione proposta |
 |---|---|---|---|
-| 15 | **Endpoint di prova `GET /api/ping-ai`** (`Endpoints/AiEndpoints.cs`) ancora presente: chiunque raggiunga l'API può farlo chiamare e far spendere token. | Costo minimo ora, ma inutile una volta pronto il primo agente. | Eliminarlo (file + `app.MapAiEndpoints()` in `Program.cs`) quando il primo agente funziona. |
+| 15 | **Endpoint `GET /api/ping-ai` e `GET /api/agents/books`** (`Endpoints/AiEndpoints.cs`) senza autenticazione: chiunque raggiunga l'API può chiamarli e far spendere token. `/api/agents/books` è un `GET` solo per comodità di prova dal browser. | Costo piccolo in locale, ma da chiudere prima di esporre l'API su internet. | Eliminare `/api/ping-ai` (inutile ora che l'agente funziona); sostituire `/api/agents/books` con l'orchestratore e un `POST`; aggiungere autenticazione. |
 | 16 | **Scadenza della chiave API Anthropic** circa 2027-02-01. | Dopo quella data le chiamate IA falliscono (errore 401). | Creare una nuova chiave e rieseguire `dotnet user-secrets set "Anthropic:ApiKey" ... --project LifeOS.Api`. |
 | 6 | **`UseHttpsRedirection` con profilo `http`**. | Avviso nei log "Failed to determine the https port"; nessun effetto pratico. | Avviare con `--launch-profile https` oppure attivare il redirect solo fuori da Development. |
 | 8 | **Modelli condivisi assenti**: i modelli stanno solo in `LifeOS.Api`. | Il frontend ridefinisce le stesse classi (già successo con `Web/Models/BookItem`, copia semplificata di `Book`: se cambia `Book`, aggiornarla a mano). | Creare un progetto `LifeOS.Shared` per i DTO usati da entrambi. |
@@ -391,4 +391,5 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-03 | Aggiunto in `/books` il selettore "Importa da Goodreads" (`InputFile`, limite 10 MB) che invia il CSV a `POST /api/books/import` e mostra il riepilogo; nuovo `Web/Models/ImportResultItem.cs` (copia di `ImportResult` dell'API: se cambia, aggiornarla a mano, vedi #8). Build: 0 errori, 0 avvisi. **Non ancora provato nel browser.** |
 | 2026-11-03 | Commit `f59cd91` (import CSV, voto decimale, pulsante). Creata la chiave API Anthropic (scadenza 90 giorni, circa 2027-02-01) e salvata con `dotnet user-secrets` (`UserSecretsId` aggiunto a `LifeOS.Api.csproj`: non è un segreto). Aggiunto `Microsoft.Agents.AI.Anthropic` 1.27.0. Build: 0 errori, 0 avvisi. |
 | 2026-11-03 | Registrato l'`IChatClient` Anthropic in `Program.cs`, aggiunto `Anthropic:Model` (`claude-haiku-5-5`) in `appsettings.json`, creato `Endpoints/AiEndpoints.cs` con `GET /api/ping-ai` (prova temporanea). Provato: Haiku risponde. Risolto #2; aperti #15 (eliminare la prova) e #16 (scadenza chiave). Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Primo agente: `Agents/BookAgent.cs` (istruzioni in italiano, data di oggi, "usa sempre gli strumenti") e `Agents/BookTools.cs` con due strumenti di sola lettura su `Books` (`GetYearSummary`, `GetBooksByStatus`); endpoint `GET /api/agents/books?question=...`. Provato con domande vere: "libri letti nel 2025" → 36 libri, 8130 pagine, voto medio 3,92, numeri **verificati sul CSV**; "libri in lettura" → elenco corretto. Build: 0 errori, 0 avvisi. |
 | 2026-11-02 | Risolti problemi #3 (CORS) e #4 (`HttpClient`); creati endpoint `GET`/`POST /api/books` (`Endpoints/BookEndpoints.cs`), pagina `Books.razor` (`/books`) con `Models/BookItem.cs`, link "Libri" nel menu; rimosso il codice demo (#5). Verificato: API avviata, `GET /api/books` → 200 con CORS corretto. Build: 0 errori, 0 avvisi. |
