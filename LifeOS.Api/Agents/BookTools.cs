@@ -240,31 +240,50 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         return ProposedNote;
     }
 
-    /// <summary>PROPONE di registrare un libro finito da un'altra persona (es. "Fra ha finito X").</summary>
-    [Description("PROPONE di registrare che un'altra persona (es. Fra) ha finito un libro. La data è facoltativa: se l'utente dà solo il mese usa il primo del mese; se non la dà, lasciala vuota (il libro conterà per l'anno in corso). Usa lo stesso titolo e autore della lista della sfida. Non salva nulla: compare un pulsante Conferma.")]
-    public async Task<object> ProposeReaderBook(
-        [Description("Nome della persona, per esempio Fra")] string readerName,
+    /// <summary>
+    /// PROPONE di registrare una lettura iniziata o finita, dell'utente o di un'altra persona
+    /// (es. "ho iniziato X il 30 ottobre", "Fra ha finito Y"). Se il libro c'è già, la conferma lo aggiorna.
+    /// </summary>
+    [Description("PROPONE di registrare un libro INIZIATO (in lettura) o FINITO, dall'utente o da un'altra persona (es. Fra). Le date sono facoltative: se l'utente dà solo il mese usa il primo del mese; un libro finito senza data conta per l'anno in corso. Se il libro è già registrato (es. iniziato prima, o tra i 'da leggere'), alla conferma viene aggiornato invece che duplicato. Per i libri della sfida usa lo stesso titolo e autore della lista. Non salva nulla: compare un pulsante Conferma.")]
+    public async Task<object> ProposeReading(
         [Description("Titolo del libro")] string title,
         [Description("Autore del libro: ricavalo tu dal titolo se l'utente non lo dice")] string author,
-        [Description("Data di fine lettura, formato yyyy-MM-dd (facoltativa)")] string? dateRead = null,
+        [Description("true se il libro è stato finito, false se è solo iniziato (in lettura)")] bool finished,
+        [Description("Nome dell'altra persona (es. Fra); lascia vuoto se è l'utente stessa a leggere")] string? readerName = null,
+        [Description("Data di inizio lettura, formato yyyy-MM-dd (facoltativa)")] string? dateStarted = null,
+        [Description("Data di fine lettura, formato yyyy-MM-dd (facoltativa, solo se finito)")] string? dateRead = null,
         [Description("Numero di pagine, se noto")] int? pages = null)
     {
-        DateOnly? date = null;
-        if (!string.IsNullOrWhiteSpace(dateRead))
-        {
-            if (!DateOnly.TryParseExact(dateRead, "yyyy-MM-dd", out var parsed))
-                return new { error = "Data non valida: usa il formato yyyy-MM-dd, oppure lasciala vuota." };
-            if (parsed > DateOnly.FromDateTime(DateTime.Today))
-                return new { error = "La data di fine lettura non può essere nel futuro." };
-            date = parsed;
-        }
-        if (string.IsNullOrWhiteSpace(readerName) || readerName.Length > 100
+        if (ParseDate(dateStarted, "inizio", out var started) is { } startError) return startError;
+        if (ParseDate(dateRead, "fine", out var ended) is { } endError) return endError;
+        if (!finished && ended is not null)
+            return new { error = "C'è una data di fine: allora il libro è finito (finished = true)." };
+        if (started is not null && ended is not null && started > ended)
+            return new { error = "La data di inizio è dopo quella di fine." };
+        if (readerName?.Length > 100
             || string.IsNullOrWhiteSpace(title) || title.Length > 500 || string.IsNullOrWhiteSpace(author) || author.Length > 200)
-            return new { error = "Nome, titolo o autore mancanti o troppo lunghi." };
+            return new { error = "Titolo o autore mancanti, o nome/titolo/autore troppo lunghi." };
         if (pages is < 1 or > 20000) pages = null;
 
-        Proposals.Add(await pending.ProposeReaderBookAsync(readerName.Trim(), title.Trim(), author.Trim(), pages, date));
+        Proposals.Add(await pending.ProposeReadingAsync(readerName?.Trim(), title.Trim(), author.Trim(), pages,
+            started, ended, finished));
         return ProposedNote;
+    }
+
+    /// <summary>
+    /// Legge una data facoltativa nel formato yyyy-MM-dd. Restituisce un errore (da girare a Claude)
+    /// se è scritta male o nel futuro, altrimenti null; la data letta finisce in "date".
+    /// </summary>
+    private static object? ParseDate(string? text, string which, out DateOnly? date)
+    {
+        date = null;
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (!DateOnly.TryParseExact(text.Trim(), "yyyy-MM-dd", out var parsed))
+            return new { error = $"Data di {which} non valida: usa il formato yyyy-MM-dd, oppure lasciala vuota." };
+        if (parsed > DateOnly.FromDateTime(DateTime.Today))
+            return new { error = $"La data di {which} lettura non può essere nel futuro." };
+        date = parsed;
+        return null;
     }
 
     /// <summary>Risposta comune degli strumenti che propongono: ricorda al modello che non è salvato.</summary>
@@ -339,7 +358,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
             .Where(b => b.Status == parsed)
             .OrderBy(b => b.Title)
             .Take(max)
-            .Select(b => new { b.Title, b.Author, b.Pages })
+            .Select(b => new { b.Title, b.Author, b.Pages, started = b.DateStarted }) // data di inizio: utile per i libri "in lettura"
             .ToListAsync();
         return new { status = parsed.ToString(), total, shown = books.Count, books };
     }

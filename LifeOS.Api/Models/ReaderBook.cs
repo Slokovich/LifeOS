@@ -37,6 +37,9 @@ public class ReaderBook : IReadingRecord
     /// <summary>Da leggere, in lettura o letto.</summary>
     public ReadingStatus Status { get; set; }
 
+    /// <summary>Quando è stato iniziato (facoltativo, si registra dalla chat).</summary>
+    public DateOnly? DateStarted { get; set; }
+
     /// <summary>Quando è stato finito (facoltativo: dalla chat si può registrare senza data).</summary>
     public DateOnly? DateRead { get; set; }
 

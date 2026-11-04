@@ -38,6 +38,9 @@ namespace LifeOS.Api.Data.Migrations
                     b.Property<DateOnly?>("DateRead")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateOnly?>("DateStarted")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("GoodreadsId")
                         .HasColumnType("INTEGER");
 
@@ -324,6 +327,9 @@ namespace LifeOS.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("DateRead")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("DateStarted")
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("GoodreadsId")

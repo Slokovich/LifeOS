@@ -12,8 +12,10 @@ public enum PendingActionType
     CreateCompetitiveChallenge,
     /// <summary>Aggiunge un libro con punteggio alla lista di una sfida competitiva.</summary>
     AddChallengeItem,
-    /// <summary>Registra un libro letto da un'altra persona (es. "Fra ha finito X").</summary>
-    AddReaderBook
+    /// <summary>Registra un libro iniziato o finito da un'altra persona (es. "Fra ha finito X").</summary>
+    AddReaderBook,
+    /// <summary>Registra un libro iniziato o finito dall'utente (es. "ho iniziato X il 30 ottobre").</summary>
+    AddMyBook
 }
 
 /// <summary>A che punto è una proposta.</summary>

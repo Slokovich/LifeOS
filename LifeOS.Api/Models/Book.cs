@@ -48,6 +48,12 @@ public class Book : IReadingRecord
     /// <summary>Quando il libro è stato aggiunto alla libreria.</summary>
     public DateOnly? DateAdded { get; set; }
 
+    /// <summary>
+    /// Quando è stato iniziato (facoltativo). Il CSV di Goodreads non la contiene: si registra
+    /// dalla chat, e un nuovo import non la cancella.
+    /// </summary>
+    public DateOnly? DateStarted { get; set; }
+
     /// <summary>Quando è stato finito: serve a contare i libri letti nell'anno (challenge).</summary>
     public DateOnly? DateRead { get; set; }
 }

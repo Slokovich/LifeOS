@@ -17,8 +17,16 @@ public interface IReadingRecord
     string? AuthorLastFirst { get; }
 
     /// <summary>Numero di pagine, se noto.</summary>
-    int? Pages { get; }
+    int? Pages { get; set; }
+
+    /// <summary>Da leggere, in lettura o letto.</summary>
+    ReadingStatus Status { get; set; }
+
+    /// <summary>Quando è stato iniziato, se noto.</summary>
+    DateOnly? DateStarted { get; set; }
 
     /// <summary>Quando è stato finito (vuoto se non ancora letto).</summary>
-    DateOnly? DateRead { get; }
+    DateOnly? DateRead { get; set; }
 }
+// Nota: le proprietà che cambiano con la lettura hanno anche "set", così la registrazione di una
+// lettura dalla chat (PendingActionService) aggiorna allo stesso modo un tuo libro o uno di Fra.

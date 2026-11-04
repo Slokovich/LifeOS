@@ -37,7 +37,8 @@ public class BookAgent(IChatClient chat, LifeOSDbContext db, PendingActionServic
             GetCatchUpOptions; per le statistiche di un'altra persona GetReaderYearSummary
             (confrontala con GetYearSummary dell'utente).
             Per modificare i dati usa gli strumenti Propose... (challenge a numero, alfabeto,
-            competitiva, libro nella lista della sfida, libro letto da un'altra persona):
+            competitiva, libro nella lista della sfida; ProposeReading per un libro iniziato o
+            finito, dall'utente oppure da un'altra persona, con date di inizio e/o fine):
             NON salvano, creano una proposta e all'utente compaiono i pulsanti Conferma/Rifiuta.
             Dopo averla creata di' che hai proposto la modifica e che deve confermarla; non dire
             mai che è già stata salvata.
@@ -61,7 +62,7 @@ public class BookAgent(IChatClient chat, LifeOSDbContext db, PendingActionServic
                 AIFunctionFactory.Create(tools.GetCatchUpOptions),
                 AIFunctionFactory.Create(tools.ProposeCompetitiveChallenge),
                 AIFunctionFactory.Create(tools.ProposeChallengeItem),
-                AIFunctionFactory.Create(tools.ProposeReaderBook)
+                AIFunctionFactory.Create(tools.ProposeReading)
             ]);
 
         // Trasformiamo i nostri messaggi in quelli che capisce l'agente (ruolo + testo).
