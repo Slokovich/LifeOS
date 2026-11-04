@@ -32,16 +32,27 @@ public class GoodreadsImportService(LifeOSDbContext db)
         var existing = await db.Books
             .Where(b => b.GoodreadsId != null)
             .ToDictionaryAsync(b => b.GoodreadsId!.Value);
+        // Libri registrati dalla chat (senza GoodreadsId): si collegano alla riga del CSV invece di duplicarli.
+        var unlinked = await db.Books.Where(b => b.GoodreadsId == null).ToListAsync();
 
         int added = 0, updated = 0;
         var (rows, skipped) = await ReadRowsAsync(csvStream);
         foreach (var row in rows)
         {
-            // Se il libro esiste già lo aggiorniamo, altrimenti ne creiamo uno nuovo.
+            // Se il libro esiste già (stesso GoodreadsId, o registrato dalla chat) lo aggiorniamo,
+            // altrimenti ne creiamo uno nuovo.
             var isNew = !existing.TryGetValue(row.GoodreadsId, out var book);
+            if (isNew && FindUnlinked(unlinked, row) is { } fromChat)
+            {
+                book = fromChat;
+                book.GoodreadsId = row.GoodreadsId;
+                unlinked.Remove(fromChat);
+                existing[row.GoodreadsId] = book;
+                isNew = false;
+            }
             if (isNew)
             {
-                book = new Book { GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author };
+                book = new Book { GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author, DateAdded = row.DateAdded };
                 existing[row.GoodreadsId] = book;
                 db.Books.Add(book);
             }
@@ -51,11 +62,9 @@ public class GoodreadsImportService(LifeOSDbContext db)
             book.Author = row.Author;
             book.AuthorLastFirst = row.AuthorLastFirst;
             book.Isbn13 = row.Isbn13;
-            book.Pages = row.Pages;
             book.MyRating = row.MyRating;
-            book.Status = row.Status;
-            book.DateAdded = row.DateAdded;
-            book.DateRead = row.DateRead;
+            book.DateAdded = row.DateAdded ?? book.DateAdded;
+            MergeReading(book, row);
             if (isNew) added++; else updated++;
         }
 
@@ -83,15 +92,38 @@ public class GoodreadsImportService(LifeOSDbContext db)
             ? new Dictionary<long, ReaderBook>()
             : await db.ReaderBooks.Where(b => b.ReaderId == reader.Id && b.GoodreadsId != null)
                 .ToDictionaryAsync(b => b.GoodreadsId!.Value);
+        // Suoi libri registrati dalla chat (senza GoodreadsId): da collegare al CSV invece di duplicarli.
+        List<ReaderBook> unlinked = reader.Id == 0 ? []
+            : await db.ReaderBooks.Where(b => b.ReaderId == reader.Id && b.GoodreadsId == null).ToListAsync();
+        var thisYear = DateTime.Today.Year;
 
         int added = 0, updated = 0;
         var (rows, skipped) = await ReadRowsAsync(csvStream);
         foreach (var row in rows)
         {
             var isNew = !existing.TryGetValue(row.GoodreadsId, out var book);
+            if (isNew && FindUnlinked(unlinked, row) is { } fromChat)
+            {
+                // Collegato a un libro registrato dalla chat: si tiene la sua data di registrazione
+                // (DateAdded), perché è l'informazione data dall'utente su quando conta.
+                book = fromChat;
+                book.GoodreadsId = row.GoodreadsId;
+                unlinked.Remove(fromChat);
+                existing[row.GoodreadsId] = book;
+                isNew = false;
+            }
             if (isNew)
             {
-                book = new ReaderBook { Reader = reader, GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author };
+                book = new ReaderBook
+                {
+                    Reader = reader, GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author,
+                    DateAdded = row.DateAdded,
+                    // Letto senza data e aggiunto su Goodreads in un anno passato: probabilmente un
+                    // caricamento in blocco di vecchie letture, quindi l'anno non si sa (CLAUDE.md §8).
+                    // Solo per i libri nuovi: a un reimport il valore già salvato non cambia.
+                    ReadYearUnknown = row.Status == ReadingStatus.Read && row.DateRead is null
+                                      && row.DateAdded is { } added0 && added0.Year < thisYear
+                };
                 existing[row.GoodreadsId] = book;
                 db.ReaderBooks.Add(book);
             }
@@ -99,16 +131,39 @@ public class GoodreadsImportService(LifeOSDbContext db)
             book!.Title = row.Title;
             book.Author = row.Author;
             book.AuthorLastFirst = row.AuthorLastFirst;
-            book.Pages = row.Pages;
             book.MyRating = row.MyRating;
-            book.Status = row.Status;
-            book.DateRead = row.DateRead;
-            book.DateAdded = row.DateAdded;
+            MergeReading(book, row);
             if (isNew) added++; else updated++;
         }
 
         await db.SaveChangesAsync();
         return new ImportResult(added, updated, skipped);
+    }
+
+    /// <summary>
+    /// Cerca, tra i libri registrati dalla chat (senza GoodreadsId), quello che corrisponde alla riga
+    /// del CSV: stesse regole della sfida (titolo + cognome dell'autore), oppure titolo identico
+    /// se l'autore è scritto in modo diverso (es. "Dostoevskij" in chat, "Dostoevsky" su Goodreads).
+    /// </summary>
+    private static T? FindUnlinked<T>(List<T> unlinked, GoodreadsRow row) where T : class, IReadingRecord
+    {
+        var rowAsRecord = new ReaderBook { Title = row.Title, Author = row.Author }; // solo per il confronto
+        return unlinked.FirstOrDefault(b => BookMatching.Matches(row.Title, row.Author, b)
+                                            || BookMatching.Matches(b.Title, null, rowAsRecord));
+    }
+
+    /// <summary>
+    /// Copia stato, data di fine e pagine dal CSV SENZA perdere ciò che è stato registrato dalla chat:
+    /// se Goodreads dice ancora "da leggere" ma qui il libro risulta iniziato, letto o abbandonato,
+    /// lo stato resta; una data di fine o un numero di pagine mancanti nel CSV non cancellano quelli salvati.
+    /// La data di inizio (DateStarted) non è nel CSV e non viene toccata.
+    /// </summary>
+    private static void MergeReading(IReadingRecord record, GoodreadsRow row)
+    {
+        if (!(row.Status == ReadingStatus.ToRead && record.Status != ReadingStatus.ToRead))
+            record.Status = row.Status;
+        record.DateRead = row.DateRead ?? record.DateRead;
+        record.Pages = row.Pages ?? record.Pages;
     }
 
     /// <summary>
@@ -161,13 +216,23 @@ public class GoodreadsImportService(LifeOSDbContext db)
         return (rows, skipped);
     }
 
-    /// <summary>Traduce lo scaffale di Goodreads ("read", "currently-reading", "to-read") nel nostro enum.</summary>
-    private static ReadingStatus ParseStatus(string? shelf) => shelf?.Trim() switch
+    /// <summary>
+    /// Traduce lo scaffale di Goodreads ("read", "currently-reading", "to-read") nel nostro enum.
+    /// Gli scaffali personali per i libri lasciati a metà ("dnf", "did-not-finish", "abandoned",
+    /// "abbandonati"…) diventano Abandoned.
+    /// </summary>
+    private static ReadingStatus ParseStatus(string? shelf)
     {
-        "read" => ReadingStatus.Read,
-        "currently-reading" => ReadingStatus.Reading,
-        _ => ReadingStatus.ToRead // "to-read" e qualsiasi valore sconosciuto
-    };
+        var s = shelf?.Trim().ToLowerInvariant() ?? "";
+        if (s is "dnf" or "did-not-finish" || s.Contains("abandon") || s.Contains("abbandon"))
+            return ReadingStatus.Abandoned;
+        return s switch
+        {
+            "read" => ReadingStatus.Read,
+            "currently-reading" => ReadingStatus.Reading,
+            _ => ReadingStatus.ToRead // "to-read" e qualsiasi valore sconosciuto
+        };
+    }
 
     /// <summary>Legge le date di Goodreads, scritte come 2024/03/15. Vuoto o illeggibile → null.</summary>
     private static DateOnly? ParseDate(string? text) =>

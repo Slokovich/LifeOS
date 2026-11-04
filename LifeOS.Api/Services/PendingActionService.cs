@@ -31,7 +31,7 @@ public class PendingActionService(LifeOSDbContext db)
     /// predefinito perché le proposte salvate prima del 2026-11-04 non li contengono (erano tutte "finito").
     /// </summary>
     public record ReaderBookPayload(string? ReaderName, string Title, string Author, int? Pages, DateOnly? DateRead,
-        DateOnly? DateStarted = null, bool Finished = true);
+        DateOnly? DateStarted = null, bool Finished = true, bool Abandoned = false);
 
     // ─── 1. CREAZIONE DELLE PROPOSTE (non modificano nulla) ───
 
@@ -62,18 +62,21 @@ public class PendingActionService(LifeOSDbContext db)
     /// un'altra persona. La frase mostrata cambia a seconda dei casi.
     /// </summary>
     public Task<PendingAction> ProposeReadingAsync(string? readerName, string title, string author, int? pages,
-        DateOnly? dateStarted, DateOnly? dateRead, bool finished)
+        DateOnly? dateStarted, DateOnly? dateRead, bool finished, bool abandoned = false)
     {
         var mine = string.IsNullOrWhiteSpace(readerName);
         var who = mine ? "hai" : $"{readerName} ha";
-        var summary = finished
+        var summary = abandoned
+            ? $"Segna che {who} abbandonato \"{title}\" di {author}" +
+              (dateStarted is { } a ? $" (iniziato il {a:dd/MM/yyyy})" : "")
+            : finished
             ? $"Segna che {who} finito \"{title}\" di {author}" +
               (dateRead is { } d ? $" il {d:dd/MM/yyyy}" : " (senza data: conta per quest'anno)") +
               (dateStarted is { } s ? $", iniziato il {s:dd/MM/yyyy}" : "")
             : $"Segna che {who} iniziato \"{title}\" di {author}" +
               (dateStarted is { } s2 ? $" il {s2:dd/MM/yyyy}" : "") + " (in lettura)";
         return AddAsync(mine ? PendingActionType.AddMyBook : PendingActionType.AddReaderBook,
-            new ReaderBookPayload(mine ? null : readerName, title, author, pages, dateRead, dateStarted, finished), summary);
+            new ReaderBookPayload(mine ? null : readerName, title, author, pages, dateRead, dateStarted, finished, abandoned), summary);
     }
 
     /// <summary>Salva una proposta in attesa. La frase mostrata all'utente la scrive il codice.</summary>
@@ -246,7 +249,7 @@ public class PendingActionService(LifeOSDbContext db)
     /// <summary>Scrive stato, date e pagine della lettura; le date non indicate restano quelle che c'erano.</summary>
     private static void ApplyReading(IReadingRecord record, ReaderBookPayload p)
     {
-        record.Status = p.Finished ? ReadingStatus.Read : ReadingStatus.Reading;
+        record.Status = p.Abandoned ? ReadingStatus.Abandoned : p.Finished ? ReadingStatus.Read : ReadingStatus.Reading;
         record.DateStarted = p.DateStarted ?? record.DateStarted;
         if (p.Finished) record.DateRead = p.DateRead ?? record.DateRead;
         record.Pages ??= p.Pages;

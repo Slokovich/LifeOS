@@ -341,6 +341,9 @@ namespace LifeOS.Api.Data.Migrations
                     b.Property<int?>("Pages")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("ReadYearUnknown")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("ReaderId")
                         .HasColumnType("INTEGER");
 

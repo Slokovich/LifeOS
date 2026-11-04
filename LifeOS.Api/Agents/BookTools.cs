@@ -62,11 +62,15 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
 
         var read = await ReaderBooksReadIn(reader.Id, year);
         var rated = read.Where(b => b.MyRating > 0).ToList();
+        // Letti in un anno sconosciuto (non contano per nessun anno): li diciamo a parte.
+        var yearUnknown = await db.ReaderBooks.CountAsync(b => b.ReaderId == reader.Id && b.Status == ReadingStatus.Read
+                                                               && b.DateRead == null && b.ReadYearUnknown);
         return new
         {
             reader = reader.Name,
             year,
             booksRead = read.Count,
+            booksReadYearUnknownAllTime = yearUnknown,
             totalPages = read.Sum(b => b.Pages ?? 0),
             averageRating = rated.Count > 0 ? Math.Round(rated.Average(b => b.MyRating), 2) : (decimal?)null,
             books = read.Select(b => new { b.Title, b.Author, finished = b.DateRead })
@@ -93,7 +97,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         var opponentScore = challenge.Items.Where(i => opponentRead.Any(b => BookMatching.Matches(i, b))).Sum(i => i.Points);
 
         // Pagine: le prendiamo dalla tua libreria se il libro c'è (es. tra i "da leggere").
-        var library = await db.Books.Where(b => b.Status != ReadingStatus.Read).ToListAsync();
+        var library = await db.Books.Where(b => b.Status == ReadingStatus.ToRead || b.Status == ReadingStatus.Reading).ToListAsync();
         var options = challenge.Items
             .Where(i => !myRead.Any(b => BookMatching.Matches(i, b)))
             .Select(i =>
@@ -153,7 +157,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         // Candidati: libri non ancora letti. Il filtro per lettera si fa in memoria perché
         // l'iniziale del cognome si calcola in C# (accenti, "Cognome, Nome").
         perLetter = Math.Clamp(perLetter, 1, 5);
-        var candidates = await db.Books.Where(b => b.Status != ReadingStatus.Read).ToListAsync();
+        var candidates = await db.Books.Where(b => b.Status == ReadingStatus.ToRead || b.Status == ReadingStatus.Reading).ToListAsync();
         var byLetter = candidates
             .Select(b => (book: b, letter: AlphabetChallenge.SurnameInitial(b)))
             .Where(x => x.letter is char l && !coveredLetters.Contains(l))
@@ -244,7 +248,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
     /// PROPONE di registrare una lettura iniziata o finita, dell'utente o di un'altra persona
     /// (es. "ho iniziato X il 30 ottobre", "Fra ha finito Y"). Se il libro c'è già, la conferma lo aggiorna.
     /// </summary>
-    [Description("PROPONE di registrare un libro INIZIATO (in lettura) o FINITO, dall'utente o da un'altra persona (es. Fra). Le date sono facoltative: se l'utente dà solo il mese usa il primo del mese; un libro finito senza data conta per l'anno in corso. Se il libro è già registrato (es. iniziato prima, o tra i 'da leggere'), alla conferma viene aggiornato invece che duplicato. Per i libri della sfida usa lo stesso titolo e autore della lista. Non salva nulla: compare un pulsante Conferma.")]
+    [Description("PROPONE di registrare un libro INIZIATO (in lettura), FINITO o ABBANDONATO, dall'utente o da un'altra persona (es. Fra). Le date sono facoltative: se l'utente dà solo il mese usa il primo del mese; un libro finito senza data conta per l'anno in corso. Se il libro è già registrato (es. iniziato prima, o tra i 'da leggere'), alla conferma viene aggiornato invece che duplicato. Per i libri della sfida usa lo stesso titolo e autore della lista. Non salva nulla: compare un pulsante Conferma.")]
     public async Task<object> ProposeReading(
         [Description("Titolo del libro")] string title,
         [Description("Autore del libro: ricavalo tu dal titolo se l'utente non lo dice")] string author,
@@ -252,10 +256,13 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         [Description("Nome dell'altra persona (es. Fra); lascia vuoto se è l'utente stessa a leggere")] string? readerName = null,
         [Description("Data di inizio lettura, formato yyyy-MM-dd (facoltativa)")] string? dateStarted = null,
         [Description("Data di fine lettura, formato yyyy-MM-dd (facoltativa, solo se finito)")] string? dateRead = null,
-        [Description("Numero di pagine, se noto")] int? pages = null)
+        [Description("Numero di pagine, se noto")] int? pages = null,
+        [Description("true se il libro è stato ABBANDONATO (iniziato e lasciato): in quel caso finished = false e niente data di fine")] bool abandoned = false)
     {
         if (ParseDate(dateStarted, "inizio", out var started) is { } startError) return startError;
         if (ParseDate(dateRead, "fine", out var ended) is { } endError) return endError;
+        if (abandoned && (finished || ended is not null))
+            return new { error = "Un libro abbandonato non è finito: usa finished = false e nessuna data di fine." };
         if (!finished && ended is not null)
             return new { error = "C'è una data di fine: allora il libro è finito (finished = true)." };
         if (started is not null && ended is not null && started > ended)
@@ -266,7 +273,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         if (pages is < 1 or > 20000) pages = null;
 
         Proposals.Add(await pending.ProposeReadingAsync(readerName?.Trim(), title.Trim(), author.Trim(), pages,
-            started, ended, finished));
+            started, ended, finished, abandoned));
         return ProposedNote;
     }
 
@@ -324,7 +331,7 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
         return db.ReaderBooks
             .Where(b => b.ReaderId == readerId && b.Status == ReadingStatus.Read
                         && ((b.DateRead >= from && b.DateRead <= to)
-                            || (b.DateRead == null && b.DateAdded >= from && b.DateAdded <= to)))
+                            || (b.DateRead == null && !b.ReadYearUnknown && b.DateAdded >= from && b.DateAdded <= to)))
             .OrderBy(b => b.DateRead)
             .ToListAsync();
     }
@@ -344,12 +351,12 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
     /// <summary>Elenco di libri in un certo stato di lettura.</summary>
     [Description("Elenco di libri per stato: ToRead (da leggere), Reading (in lettura) o Read (letti).")]
     public async Task<object> GetBooksByStatus(
-        [Description("Lo stato: ToRead, Reading oppure Read")] string status,
+        [Description("Lo stato: ToRead, Reading, Read oppure Abandoned")] string status,
         [Description("Quanti libri al massimo restituire (da 1 a 50)")] int max = 15)
     {
         // Claude potrebbe scrivere lo stato in modo imperfetto: se non lo riconosciamo lo diciamo.
         if (!Enum.TryParse<ReadingStatus>(status, ignoreCase: true, out var parsed))
-            return new { error = "Stato non valido. Valori ammessi: ToRead, Reading, Read." };
+            return new { error = "Stato non valido. Valori ammessi: ToRead, Reading, Read, Abandoned." };
 
         // Limitiamo il numero di risultati: meno dati inviati = meno token = meno costo.
         max = Math.Clamp(max, 1, 50);
@@ -361,5 +368,124 @@ public class BookTools(LifeOSDbContext db, PendingActionService pending)
             .Select(b => new { b.Title, b.Author, b.Pages, started = b.DateStarted }) // data di inizio: utile per i libri "in lettura"
             .ToListAsync();
         return new { status = parsed.ToString(), total, shown = books.Count, books };
+    }
+
+    // ─── CONSIGLI (fase 2): profilo dei gusti, pila dei "da leggere", controllo libreria ───
+
+    /// <summary>
+    /// Profilo dei gusti calcolato dai voti: autori amati e bocciati, libri preferiti e detestati,
+    /// abbandonati, voto medio per lunghezza. Generi e temi non sono nei dati: li deduce Claude.
+    /// </summary>
+    [Description("Profilo dei gusti dell'utente calcolato dai suoi voti: autori amati e bocciati, libri preferiti (voto >= 4,5), libri bocciati (voto <= 2), libri abbandonati, voto medio per lunghezza del libro. Usalo PRIMA di consigliare qualsiasi libro.")]
+    public async Task<object> GetTasteProfile()
+    {
+        var books = await db.Books
+            .Where(b => b.Status == ReadingStatus.Read || b.Status == ReadingStatus.Abandoned)
+            .ToListAsync();
+        // Solo i letti con voto: 0 = nessun voto (CLAUDE.md §8). Calcoli in memoria (decimal in SQLite).
+        var rated = books.Where(b => b.Status == ReadingStatus.Read && b.MyRating > 0).ToList();
+        var byAuthor = rated
+            .GroupBy(b => b.Author)
+            .Select(g => new { author = g.Key, booksRated = g.Count(), averageRating = Math.Round(g.Average(b => b.MyRating), 2) })
+            .ToList();
+
+        return new
+        {
+            booksRead = books.Count(b => b.Status == ReadingStatus.Read),
+            booksRated = rated.Count,
+            averageRating = rated.Count > 0 ? Math.Round(rated.Average(b => b.MyRating), 2) : (decimal?)null,
+            // Amati: almeno 2 libri con media alta, così un solo bel libro non basta a fare un "autore preferito".
+            lovedAuthors = byAuthor.Where(a => a.booksRated >= 2 && a.averageRating >= 4m)
+                .OrderByDescending(a => a.averageRating).ThenByDescending(a => a.booksRated).Take(20),
+            dislikedAuthors = byAuthor.Where(a => a.averageRating <= 2.5m)
+                .OrderBy(a => a.averageRating).Take(15),
+            favoriteBooks = rated.Where(b => b.MyRating >= 4.5m).OrderByDescending(b => b.DateRead).Take(25)
+                .Select(b => new { b.Title, b.Author, rating = b.MyRating, b.Pages }),
+            dislikedBooks = rated.Where(b => b.MyRating <= 2m).OrderByDescending(b => b.DateRead).Take(15)
+                .Select(b => new { b.Title, b.Author, rating = b.MyRating }),
+            abandonedBooks = books.Where(b => b.Status == ReadingStatus.Abandoned).Take(30)
+                .Select(b => new { b.Title, b.Author }),
+            // Voto medio per fascia di pagine: dice se preferisce libri brevi o lunghi.
+            ratingByLength = rated.Where(b => b.Pages > 0)
+                .GroupBy(b => b.Pages < 200 ? "meno di 200" : b.Pages < 400 ? "200-399" : b.Pages < 600 ? "400-599" : "600 e oltre")
+                .Select(g => new { pages = g.Key, books = g.Count(), averageRating = Math.Round(g.Average(b => b.MyRating), 2) }),
+            note = "Generi e temi non sono nei dati: deducili dai titoli e dagli autori che conosci, dicendo che è una tua deduzione."
+        };
+    }
+
+    /// <summary>
+    /// I libri della pila "da leggere", con il voto medio che l'utente ha dato ai loro autori:
+    /// prima quelli di autori amati, poi quelli di autori nuovi (dai più vecchi in pila).
+    /// </summary>
+    [Description("Libri della pila 'da leggere' dell'utente (già posseduti/desiderati), filtrabili per pagine e autore. Per ognuno: pagine, data di aggiunta, voto medio che l'utente ha dato all'autore e quanti suoi libri ha letto, e se ha abbandonato un libro di quell'autore. Ordinati: prima gli autori amati, poi quelli nuovi, poi i meno amati. Consiglia SEMPRE prima da qui.")]
+    public async Task<object> GetToReadCandidates(
+        [Description("Numero massimo di pagine (facoltativo, es. 250 per un libro breve)")] int? maxPages = null,
+        [Description("Numero minimo di pagine (facoltativo)")] int? minPages = null,
+        [Description("Parte del nome dell'autore (facoltativo)")] string? author = null,
+        [Description("Quanti libri al massimo restituire (da 1 a 60)")] int max = 30)
+    {
+        // Statistiche per autore dai tuoi libri letti e abbandonati.
+        var history = await db.Books
+            .Where(b => b.Status == ReadingStatus.Read || b.Status == ReadingStatus.Abandoned)
+            .ToListAsync();
+        var ratings = history.Where(b => b.Status == ReadingStatus.Read && b.MyRating > 0)
+            .GroupBy(b => b.Author)
+            .ToDictionary(g => g.Key, g => (avg: Math.Round(g.Average(b => b.MyRating), 2), count: g.Count()));
+        var abandonedAuthors = history.Where(b => b.Status == ReadingStatus.Abandoned).Select(b => b.Author).ToHashSet();
+
+        var query = db.Books.Where(b => b.Status == ReadingStatus.ToRead);
+        if (maxPages is > 0) query = query.Where(b => b.Pages != null && b.Pages <= maxPages);
+        if (minPages is > 0) query = query.Where(b => b.Pages != null && b.Pages >= minPages);
+        var pile = await query.ToListAsync();
+        // Filtro per autore in memoria: senza maiuscole/minuscole.
+        if (!string.IsNullOrWhiteSpace(author))
+            pile = pile.Where(b => b.Author.Contains(author.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+        max = Math.Clamp(max, 1, 60);
+        var ranked = pile
+            .Select(b => new
+            {
+                b.Title, b.Author, b.Pages,
+                addedOn = b.DateAdded,
+                myAverageForAuthor = ratings.TryGetValue(b.Author, out var r) ? r.avg : (decimal?)null,
+                booksReadByAuthor = ratings.TryGetValue(b.Author, out var r2) ? r2.count : 0,
+                abandonedThisAuthor = abandonedAuthors.Contains(b.Author)
+            })
+            // Autore sconosciuto = 3,5 (neutro): sta dopo gli amati e prima dei bocciati.
+            .OrderBy(b => b.abandonedThisAuthor)
+            .ThenByDescending(b => b.myAverageForAuthor ?? 3.5m)
+            .ThenBy(b => b.addedOn ?? DateOnly.MaxValue) // a parità, i più vecchi in pila
+            .Take(max)
+            .ToList();
+
+        return new { totalInPile = pile.Count, shown = ranked.Count, books = ranked };
+    }
+
+    /// <summary>Un libro da cercare nella libreria (parametro di CheckBooksInLibrary).</summary>
+    public record BookQuery(
+        [property: Description("Titolo")] string Title,
+        [property: Description("Autore (consigliato: evita confusioni tra titoli simili)")] string? Author);
+
+    /// <summary>
+    /// Controlla se dei libri sono già nella libreria dell'utente (letti, da leggere, abbandonati…),
+    /// per non consigliare un libro già letto o già in pila come se fosse nuovo.
+    /// </summary>
+    [Description("Controlla se dei libri sono già nella libreria dell'utente e in che stato (Read con voto, ToRead, Reading, Abandoned). Usalo SEMPRE prima di consigliare libri che non vengono da GetToReadCandidates, ed escludi quelli già letti o abbandonati.")]
+    public async Task<object> CheckBooksInLibrary(
+        [Description("I libri da controllare (al massimo 30)")] List<BookQuery> books)
+    {
+        var library = await db.Books.ToListAsync();
+        return books.Take(30).Select(q =>
+        {
+            // Stessa regola di riconoscimento della sfida competitiva (titolo normalizzato + autore).
+            var found = library.FirstOrDefault(b => BookMatching.Matches(q.Title, q.Author, b));
+            return new
+            {
+                q.Title, q.Author,
+                inLibrary = found is not null,
+                status = found?.Status.ToString(),
+                rating = found is { MyRating: > 0 } ? found.MyRating : (decimal?)null
+            };
+        }).ToList();
     }
 }

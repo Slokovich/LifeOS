@@ -48,4 +48,11 @@ public class ReaderBook : IReadingRecord
     /// SENZA <see cref="DateRead"/> conta per l'anno di questa data.
     /// </summary>
     public DateOnly? DateAdded { get; set; }
+
+    /// <summary>
+    /// Vero = letto, ma non si sa in che anno: NON conta per nessun anno (nemmeno quello di DateAdded).
+    /// L'import lo imposta per i libri letti senza data aggiunti su Goodreads prima dell'anno in corso,
+    /// tipico di chi carica in blocco le letture passate (es. Fra a maggio 2025).
+    /// </summary>
+    public bool ReadYearUnknown { get; set; }
 }

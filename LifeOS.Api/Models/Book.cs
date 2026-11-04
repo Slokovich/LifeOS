@@ -6,7 +6,9 @@ public enum ReadingStatus
 {
     ToRead,   // da leggere ("to-read")
     Reading,  // in lettura ("currently-reading")
-    Read      // letto ("read")
+    Read,     // letto ("read")
+    Abandoned // abbandonato: iniziato e lasciato (su Goodreads uno scaffale come "dnf" o "abandoned").
+              // Non conta per le challenge e serve ai consigli per non riproporre libri simili.
 }
 
 /// <summary>

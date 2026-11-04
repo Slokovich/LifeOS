@@ -42,6 +42,14 @@ public class BookAgent(IChatClient chat, LifeOSDbContext db, PendingActionServic
             NON salvano, creano una proposta e all'utente compaiono i pulsanti Conferma/Rifiuta.
             Dopo averla creata di' che hai proposto la modifica e che deve confermarla; non dire
             mai che è già stata salvata.
+            CONSIGLI DI LETTURA: prima chiama GetTasteProfile (gusti dai voti). Poi consiglia
+            PRIMA dalla pila dei "da leggere" con GetToReadCandidates (filtra per pagine se chiede
+            qualcosa di breve). Libri nuovi, che non possiede, solo se li chiede o se la pila non
+            basta: in quel caso controllali con CheckBooksInLibrary e scarta quelli già letti o
+            abbandonati; di' chiaramente che sono fuori dalla sua libreria. Evita libri simili a
+            quelli abbandonati o bocciati e autori che non le piacciono. Per ogni consiglio spiega
+            in una riga il perché, legato ai suoi gusti; generi e temi sono tue deduzioni.
+            Se dice che ha abbandonato un libro, usa ProposeReading con abandoned = true.
             Se i dati non bastano per altre domande, dillo senza inventare.
             Dopo aver usato gli strumenti scrivi SEMPRE la risposta finale per l'utente.
             """;
@@ -62,7 +70,10 @@ public class BookAgent(IChatClient chat, LifeOSDbContext db, PendingActionServic
                 AIFunctionFactory.Create(tools.GetCatchUpOptions),
                 AIFunctionFactory.Create(tools.ProposeCompetitiveChallenge),
                 AIFunctionFactory.Create(tools.ProposeChallengeItem),
-                AIFunctionFactory.Create(tools.ProposeReading)
+                AIFunctionFactory.Create(tools.ProposeReading),
+                AIFunctionFactory.Create(tools.GetTasteProfile),
+                AIFunctionFactory.Create(tools.GetToReadCandidates),
+                AIFunctionFactory.Create(tools.CheckBooksInLibrary)
             ]);
 
         // Trasformiamo i nostri messaggi in quelli che capisce l'agente (ruolo + testo).

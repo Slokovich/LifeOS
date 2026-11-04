@@ -19,7 +19,7 @@ public class BookItem
     public string Author { get; set; } = "";
 
     /// <summary>
-    /// Stato di lettura come testo: "ToRead", "Reading" o "Read".
+    /// Stato di lettura come testo: "ToRead", "Reading", "Read" o "Abandoned".
     /// Qui è una stringa (e non un enum) perché l'API invia gli enum come parole.
     /// </summary>
     public string Status { get; set; } = "ToRead";
