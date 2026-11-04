@@ -1,0 +1,186 @@
+@* Chat.razor — pagina "Chat": una conversazione con l'agente Libri.
+   Il browser tiene la cronologia dei messaggi e la rimanda all'API a ogni domanda
+   (POST /api/agents/books): così l'agente "ricorda" la conversazione senza che l'API salvi nulla.
+   Il frontend parla solo con l'API, mai direttamente con l'IA (CLAUDE.md §6). *@
+
+@page "/chat"
+@using LifeOS.Web.Models
+@using Markdig
+@inject HttpClient Http
+
+<PageTitle>Chat</PageTitle>
+
+<h1>Chat con l'agente Libri</h1>
+
+@* ─── Conversazione ─── *@
+@if (messages.Count == 0)
+{
+    <p class="text-muted">
+        Scrivi una domanda, per esempio: <em>"Quanti libri ho letto nel 2025?"</em>
+        oppure <em>"Sono in pari con la reading challenge?"</em>
+    </p>
+}
+
+@foreach (var message in messages)
+{
+    var isUser = message.Role == "user";
+    @* Messaggi tuoi a destra (blu), dell'agente a sinistra (grigio). *@
+    <div class="d-flex mb-2 @(isUser ? "justify-content-end" : "justify-content-start")">
+        <div class="chat-bubble p-2 px-3 rounded @(isUser ? "bg-primary text-white" : "bg-light border text-dark")">
+            @if (isUser)
+            {
+                @* Il tuo testo viene mostrato così com'è (Blazor lo rende sicuro in automatico). *@
+                @message.Text
+            }
+            else
+            {
+                @* La risposta dell'agente è Markdown (**grassetto**, elenchi...): la convertiamo in HTML. *@
+                @((MarkupString)RenderMarkdown(message.Text))
+
+                @* Modifiche proposte dall'agente: non succede nulla finché non premi Conferma. *@
+                @foreach (var proposal in message.Proposals)
+                {
+                    <div class="border rounded p-2 mt-2 bg-white">
+                        <div>@proposal.Summary</div>
+                        @if (proposal.State == "pending")
+                        {
+                            <button class="btn btn-sm btn-success me-1 mt-1" disabled="@busy"
+                                    @onclick="() => ResolveAsync(proposal, true)">Conferma</button>
+                            <button class="btn btn-sm btn-outline-secondary mt-1" disabled="@busy"
+                                    @onclick="() => ResolveAsync(proposal, false)">Rifiuta</button>
+                        }
+                        else
+                        {
+                            <small class="text-muted">@(proposal.State == "confirmed" ? "✓ Confermata e salvata" : "✗ Rifiutata")</small>
+                        }
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@if (busy)
+{
+    <p class="text-muted"><em>L'agente sta pensando...</em></p>
+}
+
+@if (error is not null)
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+@* ─── Campo di scrittura ─── *@
+@* @onsubmit = parte sia col pulsante sia premendo Invio. *@
+<form class="row g-2 mt-3" @onsubmit="SendAsync">
+    <div class="col">
+        @* @bind:event="oninput" = la variabile si aggiorna a ogni lettera, così Invio invia il testo completo. *@
+        <input class="form-control" placeholder="Scrivi un messaggio..." @bind="input" @bind:event="oninput"
+               disabled="@busy" @ref="inputBox" autocomplete="off" />
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary" type="submit" disabled="@busy">Invia</button>
+        <button class="btn btn-outline-secondary" type="button" @onclick="NewConversation" disabled="@busy">
+            Nuova conversazione
+        </button>
+    </div>
+</form>
+
+@code {
+    // Tutta la conversazione finora (tua e dell'agente), nell'ordine in cui è avvenuta.
+    private readonly List<ChatMessageItem> messages = [];
+
+    // Testo che stai scrivendo, riferimento al campo (per rimetterci il cursore) e stati.
+    private string input = "";
+    private ElementReference inputBox;
+    private bool busy;
+    private string? error;
+
+    // Convertitore Markdown → HTML, creato una volta sola.
+    // DisableHtml: ignora l'HTML scritto dentro il testo (per esempio nei titoli dei libri),
+    // così nessun contenuto può inserire codice nella pagina.
+    private static readonly MarkdownPipeline markdown =
+        new MarkdownPipelineBuilder().DisableHtml().UseAdvancedExtensions().Build();
+
+    private static string RenderMarkdown(string text) => Markdown.ToHtml(text, markdown);
+
+    // Invia il messaggio all'API e aggiunge la risposta alla conversazione.
+    private async Task SendAsync()
+    {
+        var text = input.Trim();
+        if (text.Length == 0 || busy) return;
+
+        // Mostriamo subito il tuo messaggio e svuotiamo il campo.
+        messages.Add(new ChatMessageItem { Role = "user", Text = text });
+        input = "";
+        error = null;
+        busy = true;
+
+        try
+        {
+            // Mandiamo TUTTA la conversazione: è la "memoria" dell'agente.
+            var response = await Http.PostAsJsonAsync("api/agents/books", messages);
+            if (!response.IsSuccessStatusCode)
+            {
+                // Annulliamo l'invio: togliamo il messaggio e lo rimettiamo nel campo per riprovare.
+                messages.RemoveAt(messages.Count - 1);
+                input = text;
+                error = $"Errore {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}";
+                return;
+            }
+
+            var reply = await response.Content.ReadFromJsonAsync<ChatReplyItem>();
+            messages.Add(new ChatMessageItem
+            {
+                Role = "assistant",
+                Text = reply?.Answer ?? "(risposta vuota)",
+                Proposals = reply?.Proposals ?? []
+            });
+        }
+        catch (HttpRequestException)
+        {
+            // Succede se l'API non è avviata o il CORS blocca la richiesta.
+            messages.RemoveAt(messages.Count - 1);
+            input = text;
+            error = "Impossibile contattare l'API. È avviata (dotnet run --project LifeOS.Api)?";
+        }
+        finally
+        {
+            busy = false;
+        }
+
+        // Rimette il cursore nel campo (e porta la vista in basso) per scrivere subito il messaggio dopo.
+        await Task.Yield(); // aspetta che Blazor riabiliti il campo
+        await inputBox.FocusAsync();
+    }
+
+    // Conferma o rifiuta una proposta: chiama l'API, che è l'unica a poter modificare i dati.
+    private async Task ResolveAsync(ProposalItem proposal, bool confirm)
+    {
+        busy = true;
+        error = null;
+        try
+        {
+            var response = await Http.PostAsync($"api/pending/{proposal.Id}/{(confirm ? "confirm" : "reject")}", null);
+            if (response.IsSuccessStatusCode)
+                proposal.State = confirm ? "confirmed" : "rejected";
+            else
+                error = $"Errore {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}";
+        }
+        catch (HttpRequestException)
+        {
+            error = "Impossibile contattare l'API. È avviata (dotnet run --project LifeOS.Api)?";
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Svuota la conversazione: l'agente riparte da zero.
+    private void NewConversation()
+    {
+        messages.Clear();
+        error = null;
+    }
+}

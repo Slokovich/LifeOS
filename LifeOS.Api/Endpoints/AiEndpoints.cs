@@ -1,4 +1,5 @@
 using LifeOS.Api.Agents;       // BookAgent
+using LifeOS.Api.Dtos;         // ChatMessageDto
 using Microsoft.Extensions.AI; // IChatClient: l'interfaccia standard per "parlare" con un modello IA
 
 namespace LifeOS.Api.Endpoints;
@@ -14,16 +15,35 @@ public static class AiEndpoints
         // GET /api/ping-ai → PROVA TEMPORANEA: manda a Claude una domanda brevissima e restituisce
         // la risposta, per verificare che chiave, modello e connessione funzionino.
         // Da eliminare quando il primo agente è operativo.
-        // GET /api/agents/books?question=... → fa una domanda all'agente Libri.
-        // È un GET (e non un POST) solo per poterlo provare dalla barra del browser; sarà
-        // sostituito dall'orchestratore e da una pagina di chat. Ogni chiamata costa pochi centesimi.
-        app.MapGet("/api/agents/books", async (string question, BookAgent agent) =>
+        // POST /api/agents/books → conversazione con l'agente Libri (usato dalla pagina /chat).
+        // Il corpo è la lista dei messaggi finora, l'ultimo è la nuova domanda dell'utente.
+        // Sarà sostituito dall'orchestratore. Ogni chiamata costa pochi centesimi.
+        app.MapPost("/api/agents/books", async (List<ChatMessageDto> messages, BookAgent agent) =>
         {
-            if (string.IsNullOrWhiteSpace(question))
-                return Results.BadRequest("Scrivi una domanda (parametro 'question').");
+            // Controlli sui dati ricevuti (il frontend non è mai "fidato").
+            if (messages.Count == 0 || messages[^1].Role != "user")
+                return Results.BadRequest("L'ultimo messaggio deve essere una domanda dell'utente.");
+            if (messages.Any(m => m.Role is not ("user" or "assistant")))
+                return Results.BadRequest("Messaggi non validi (ruolo sconosciuto).");
+            // La domanda nuova dell'utente deve essere non vuota e al massimo di 4000 caratteri.
+            if (string.IsNullOrWhiteSpace(messages[^1].Text) || messages[^1].Text.Length > 4000)
+                return Results.BadRequest("La domanda è vuota o supera i 4000 caratteri.");
+
+            // CRONOLOGIA: le risposte dell'agente non vanno rifiutate (le ha scritte lui, non l'utente):
+            // quelle vuote (es. di quando il modello si fermava senza rispondere) si scartano, quelle
+            // troppo lunghe (es. i prospetti) si accorciano a 4000 caratteri per contenere i costi.
+            var history = messages
+                .Where(m => !string.IsNullOrWhiteSpace(m.Text))
+                .Select(m => m.Text.Length > 4000 ? new ChatMessageDto { Role = m.Role, Text = m.Text[..4000] } : m);
+
+            // Per contenere i costi teniamo solo gli ultimi 20 messaggi, partendo sempre da uno dell'utente
+            // (l'API di Claude richiede che la conversazione inizi con l'utente).
+            var recent = history.TakeLast(20).SkipWhile(m => m.Role != "user").ToList();
+
             try
             {
-                return Results.Ok(new { answer = await agent.AskAsync(question) });
+                // Risposta: { answer, proposals: [{ id, summary }] }
+                return Results.Ok(await agent.AskAsync(recent));
             }
             catch (Exception ex)
             {

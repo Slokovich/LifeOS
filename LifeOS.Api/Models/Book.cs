@@ -13,7 +13,7 @@ public enum ReadingStatus
 /// Libro importato dal CSV di Goodreads, usato dall'agente Libri per la reading challenge annuale.
 /// Ogni oggetto = una riga della tabella Books.
 /// </summary>
-public class Book
+public class Book : IReadingRecord
 {
     /// <summary>Identificativo unico interno, assegnato automaticamente dal database.</summary>
     public int Id { get; set; }
@@ -26,6 +26,12 @@ public class Book
 
     /// <summary>Autore principale (obbligatorio, max 200 caratteri).</summary>
     public required string Author { get; set; }
+
+    /// <summary>
+    /// Autore nella forma "Cognome, Nome" (colonna "Author l-f" di Goodreads), se nota.
+    /// Serve alla challenge alfabeto per ricavare con precisione l'iniziale del cognome.
+    /// </summary>
+    public string? AuthorLastFirst { get; set; }
 
     /// <summary>Codice ISBN a 13 cifre, se presente nel CSV. È testo perché può iniziare con zero.</summary>
     public string? Isbn13 { get; set; }

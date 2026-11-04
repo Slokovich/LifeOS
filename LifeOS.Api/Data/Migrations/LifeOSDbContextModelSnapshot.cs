@@ -28,6 +28,10 @@ namespace LifeOS.Api.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AuthorLastFirst")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly?>("DateAdded")
                         .HasColumnType("TEXT");
 
@@ -63,6 +67,70 @@ namespace LifeOS.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Books");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.Challenge", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Year");
+
+                    b.ToTable("Challenges");
+
+                    b.HasDiscriminator<string>("Kind").HasValue("Challenge");
+
+                    b.UseTphMappingStrategy();
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.ChallengeListItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AnyBookByAuthor")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Author")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ChallengeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Points")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChallengeId");
+
+                    b.ToTable("ChallengeListItems");
                 });
 
             modelBuilder.Entity("LifeOS.Api.Models.Course", b =>
@@ -182,6 +250,113 @@ namespace LifeOS.Api.Data.Migrations
                     b.ToTable("MenstrualCycles");
                 });
 
+            modelBuilder.Entity("LifeOS.Api.Models.PendingAction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("PendingActions");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.Reader", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Readers");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.ReaderBook", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AuthorLastFirst")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("DateAdded")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly?>("DateRead")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("GoodreadsId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("MyRating")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Pages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ReaderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DateRead");
+
+                    b.HasIndex("ReaderId", "GoodreadsId")
+                        .IsUnique();
+
+                    b.ToTable("ReaderBooks");
+                });
+
             modelBuilder.Entity("LifeOS.Api.Models.StudySession", b =>
                 {
                     b.Property<int>("Id")
@@ -215,6 +390,55 @@ namespace LifeOS.Api.Data.Migrations
                     b.ToTable("StudySessions");
                 });
 
+            modelBuilder.Entity("LifeOS.Api.Models.AlphabetChallenge", b =>
+                {
+                    b.HasBaseType("LifeOS.Api.Models.Challenge");
+
+                    b.HasDiscriminator().HasValue("Alphabet");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.CompetitiveChallenge", b =>
+                {
+                    b.HasBaseType("LifeOS.Api.Models.Challenge");
+
+                    b.Property<int>("OpponentId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasIndex("OpponentId");
+
+                    b.HasDiscriminator().HasValue("Competitive");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.CountChallenge", b =>
+                {
+                    b.HasBaseType("LifeOS.Api.Models.Challenge");
+
+                    b.Property<int>("TargetBooks")
+                        .HasColumnType("INTEGER");
+
+                    b.HasDiscriminator().HasValue("Count");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.ChallengeListItem", b =>
+                {
+                    b.HasOne("LifeOS.Api.Models.CompetitiveChallenge", null)
+                        .WithMany("Items")
+                        .HasForeignKey("ChallengeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.ReaderBook", b =>
+                {
+                    b.HasOne("LifeOS.Api.Models.Reader", "Reader")
+                        .WithMany("Books")
+                        .HasForeignKey("ReaderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Reader");
+                });
+
             modelBuilder.Entity("LifeOS.Api.Models.StudySession", b =>
                 {
                     b.HasOne("LifeOS.Api.Models.Course", "Course")
@@ -226,9 +450,30 @@ namespace LifeOS.Api.Data.Migrations
                     b.Navigation("Course");
                 });
 
+            modelBuilder.Entity("LifeOS.Api.Models.CompetitiveChallenge", b =>
+                {
+                    b.HasOne("LifeOS.Api.Models.Reader", "Opponent")
+                        .WithMany()
+                        .HasForeignKey("OpponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Opponent");
+                });
+
             modelBuilder.Entity("LifeOS.Api.Models.Course", b =>
                 {
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.Reader", b =>
+                {
+                    b.Navigation("Books");
+                });
+
+            modelBuilder.Entity("LifeOS.Api.Models.CompetitiveChallenge", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

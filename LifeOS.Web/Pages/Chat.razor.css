@@ -1,0 +1,19 @@
+/* Stile solo per Chat.razor (file "isolato": vale solo per questa pagina). */
+
+/* Larghezza massima dei fumetti: non occupano mai tutta la riga. */
+.chat-bubble {
+    max-width: 80%;
+}
+
+/* ::deep serve perché il testo dell'agente è HTML generato dal Markdown, non scritto nel .razor:
+   senza ::deep lo stile isolato non lo raggiungerebbe. Qui togliamo lo spazio sotto l'ultimo paragrafo
+   e sistemiamo tabelle ed elenchi dentro il fumetto. */
+.chat-bubble ::deep p:last-child,
+.chat-bubble ::deep ul:last-child,
+.chat-bubble ::deep ol:last-child {
+    margin-bottom: 0;
+}
+
+.chat-bubble ::deep table {
+    margin-bottom: 0;
+}

@@ -20,10 +20,103 @@ public record ImportResult(int Added, int Updated, int Skipped);
 /// </summary>
 public class GoodreadsImportService(LifeOSDbContext db)
 {
-    /// <summary>Importa i libri dal flusso di dati del CSV e restituisce il riepilogo.</summary>
+    /// <summary>Una riga valida del CSV di Goodreads, già letta e ripulita.</summary>
+    private record GoodreadsRow(long GoodreadsId, string Title, string Author, string? AuthorLastFirst,
+        string? Isbn13, int? Pages, decimal MyRating, ReadingStatus Status, DateOnly? DateAdded, DateOnly? DateRead);
+
+    /// <summary>Importa i TUOI libri dal CSV (tabella Books) e restituisce il riepilogo.</summary>
     public async Task<ImportResult> ImportAsync(Stream csvStream)
     {
-        // ─── 1. PREPARAZIONE ───
+        // Libri già nel DB che hanno un GoodreadsId, indicizzati per trovarli subito.
+        // Lo stesso dizionario si aggiorna man mano: copre anche righe doppie nello stesso file.
+        var existing = await db.Books
+            .Where(b => b.GoodreadsId != null)
+            .ToDictionaryAsync(b => b.GoodreadsId!.Value);
+
+        int added = 0, updated = 0;
+        var (rows, skipped) = await ReadRowsAsync(csvStream);
+        foreach (var row in rows)
+        {
+            // Se il libro esiste già lo aggiorniamo, altrimenti ne creiamo uno nuovo.
+            var isNew = !existing.TryGetValue(row.GoodreadsId, out var book);
+            if (isNew)
+            {
+                book = new Book { GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author };
+                existing[row.GoodreadsId] = book;
+                db.Books.Add(book);
+            }
+
+            // Copia i campi del CSV nel libro.
+            book!.Title = row.Title;
+            book.Author = row.Author;
+            book.AuthorLastFirst = row.AuthorLastFirst;
+            book.Isbn13 = row.Isbn13;
+            book.Pages = row.Pages;
+            book.MyRating = row.MyRating;
+            book.Status = row.Status;
+            book.DateAdded = row.DateAdded;
+            book.DateRead = row.DateRead;
+            if (isNew) added++; else updated++;
+        }
+
+        // Un solo SaveChanges per tutto il file: o si salva tutto o niente.
+        await db.SaveChangesAsync();
+        return new ImportResult(added, updated, skipped);
+    }
+
+    /// <summary>
+    /// Importa i libri di un'ALTRA persona (es. Fra) dal suo CSV di Goodreads (tabella ReaderBooks).
+    /// La persona viene creata se non esiste. Anche qui reimportare aggiorna senza duplicare.
+    /// </summary>
+    public async Task<ImportResult> ImportForReaderAsync(Stream csvStream, string readerName)
+    {
+        var clean = readerName.Trim();
+        var reader = await db.Readers.FirstOrDefaultAsync(r => r.Name.ToLower() == clean.ToLower());
+        if (reader is null)
+        {
+            reader = new Reader { Name = clean };
+            db.Readers.Add(reader);
+        }
+
+        // Libri già importati per questa persona (solo se esiste già: una nuova non ne ha).
+        var existing = reader.Id == 0
+            ? new Dictionary<long, ReaderBook>()
+            : await db.ReaderBooks.Where(b => b.ReaderId == reader.Id && b.GoodreadsId != null)
+                .ToDictionaryAsync(b => b.GoodreadsId!.Value);
+
+        int added = 0, updated = 0;
+        var (rows, skipped) = await ReadRowsAsync(csvStream);
+        foreach (var row in rows)
+        {
+            var isNew = !existing.TryGetValue(row.GoodreadsId, out var book);
+            if (isNew)
+            {
+                book = new ReaderBook { Reader = reader, GoodreadsId = row.GoodreadsId, Title = row.Title, Author = row.Author };
+                existing[row.GoodreadsId] = book;
+                db.ReaderBooks.Add(book);
+            }
+
+            book!.Title = row.Title;
+            book.Author = row.Author;
+            book.AuthorLastFirst = row.AuthorLastFirst;
+            book.Pages = row.Pages;
+            book.MyRating = row.MyRating;
+            book.Status = row.Status;
+            book.DateRead = row.DateRead;
+            book.DateAdded = row.DateAdded;
+            if (isNew) added++; else updated++;
+        }
+
+        await db.SaveChangesAsync();
+        return new ImportResult(added, updated, skipped);
+    }
+
+    /// <summary>
+    /// Legge tutte le righe del CSV di Goodreads. Restituisce quelle valide e quante sono state
+    /// saltate (senza "Book Id", titolo o autore). Comune ai due import qui sopra.
+    /// </summary>
+    private static async Task<(List<GoodreadsRow> Rows, int Skipped)> ReadRowsAsync(Stream csvStream)
+    {
         // Impostazioni di lettura: ignoriamo le colonne mancanti o extra, perché Goodreads
         // potrebbe cambiare il formato; leggiamo i campi per nome, non per posizione.
         var config = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -35,15 +128,8 @@ public class GoodreadsImportService(LifeOSDbContext db)
         using var reader = new StreamReader(csvStream);
         using var csv = new CsvReader(reader, config);
 
-        // Libri già nel DB che hanno un GoodreadsId, indicizzati per trovarli subito.
-        // Lo stesso dizionario si aggiorna man mano: copre anche righe doppie nello stesso file.
-        var existing = await db.Books
-            .Where(b => b.GoodreadsId != null)
-            .ToDictionaryAsync(b => b.GoodreadsId!.Value);
-
-        int added = 0, updated = 0, skipped = 0;
-
-        // ─── 2. LETTURA RIGA PER RIGA ───
+        var rows = new List<GoodreadsRow>();
+        var skipped = 0;
         await csv.ReadAsync();       // prima riga: le intestazioni
         csv.ReadHeader();
         while (await csv.ReadAsync())
@@ -58,35 +144,21 @@ public class GoodreadsImportService(LifeOSDbContext db)
                 continue;
             }
 
-            // Se il libro esiste già lo aggiorniamo, altrimenti ne creiamo uno nuovo.
-            var isNew = !existing.TryGetValue(goodreadsId, out var book);
-            if (isNew)
-            {
-                book = new Book { GoodreadsId = goodreadsId, Title = title, Author = author };
-                existing[goodreadsId] = book;
-                db.Books.Add(book);
-            }
-
-            // Copia i campi del CSV nel libro.
-            book!.Title = title;
-            book.Author = author;
-            book.Isbn13 = CleanIsbn(csv.GetField("ISBN13"));
-            book.Pages = int.TryParse(csv.GetField("Number of Pages"), out var pages) ? pages : null;
-            // Il voto nel CSV è decimale (es. "3.5"): InvariantCulture = punto come separatore decimale.
-            book.MyRating = decimal.TryParse(csv.GetField("My Rating"), NumberStyles.Number,
-                CultureInfo.InvariantCulture, out var rating)
-                ? Math.Clamp(rating, 0m, 5m) : 0m;
-            book.Status = ParseStatus(csv.GetField("Exclusive Shelf"));
-            book.DateAdded = ParseDate(csv.GetField("Date Added"));
-            book.DateRead = ParseDate(csv.GetField("Date Read"));
-
-            if (isNew) added++; else updated++;
+            // "Cognome, Nome": serve alla challenge alfabeto. Vuoto → null.
+            var lastFirst = Truncate(csv.GetField("Author l-f"), 200);
+            rows.Add(new GoodreadsRow(
+                goodreadsId, title, author,
+                lastFirst.Length > 0 ? lastFirst : null,
+                CleanIsbn(csv.GetField("ISBN13")),
+                int.TryParse(csv.GetField("Number of Pages"), out var pages) ? pages : null,
+                // Il voto nel CSV è decimale (es. "3.5"): InvariantCulture = punto come separatore decimale.
+                decimal.TryParse(csv.GetField("My Rating"), NumberStyles.Number, CultureInfo.InvariantCulture, out var rating)
+                    ? Math.Clamp(rating, 0m, 5m) : 0m,
+                ParseStatus(csv.GetField("Exclusive Shelf")),
+                ParseDate(csv.GetField("Date Added")),
+                ParseDate(csv.GetField("Date Read"))));
         }
-
-        // ─── 3. SALVATAGGIO ───
-        // Un solo SaveChanges per tutto il file: o si salva tutto o niente.
-        await db.SaveChangesAsync();
-        return new ImportResult(added, updated, skipped);
+        return (rows, skipped);
     }
 
     /// <summary>Traduce lo scaffale di Goodreads ("read", "currently-reading", "to-read") nel nostro enum.</summary>

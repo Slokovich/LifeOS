@@ -3,7 +3,7 @@
 > **A cosa serve questo file.** È il punto di partenza per chiunque lavori su LifeOS: persone (anche non esperte di programmazione) e assistenti IA (Claude Code, Copilot, ecc.). Spiega cos'è il progetto, com'è organizzato, come avviarlo, quali scelte sono state fatte e quali problemi sono noti.
 > Claude Code lo legge automaticamente all'inizio di ogni sessione, quindi tutto ciò che è scritto qui diventa "contesto" per l'IA.
 
-**Ultimo aggiornamento:** 2026-11-03 (sera, dopo l'aggiunta del connettore Anthropic)
+**Ultimo aggiornamento:** 2026-11-04 (sfida competitiva con Fra, fase 5a)
 **Repository GitHub (pubblico):** https://github.com/Slokovich/LifeOS — branch principale `main`
 
 ---
@@ -51,7 +51,7 @@ LifeOS è un'**app personale** che aiuta a organizzare la vita quotidiana (sport
 | **Orchestratore** | tutti gli agenti | Riceve la richiesta, la smista agli agenti giusti, combina le risposte | da fare |
 | **Sport** | Google Calendar, `MenstrualCycle` | Pianifica allenamenti in base a impegni e fase del ciclo | da fare |
 | **Cibo** | `MealLog`, impegni del calendario | Suggerisce cosa mangiare evitando ripetizioni e tenendo conto della giornata | da fare |
-| **Libri** | `Book` (import CSV Goodreads) | Gestisce la reading challenge annuale | **prima versione funzionante**: risponde a domande su libri letti per anno e per stato; manca l'obiettivo annuale (#9) |
+| **Libri** | `Book` (import CSV Goodreads) | Gestisce la reading challenge annuale (cosa vogliamo che faccia: vedi **§12**) | **prima versione funzionante**: risponde a domande su libri letti per anno e per stato e sulle challenge a numero, alfabeto e competitiva (ritmo atteso, lettere mancanti, punteggio contro Fra, piano di recupero con meno pagine); statistiche di Fra; crea/modifica challenge, liste e letture di Fra solo con la conferma dell'utente |
 | **Sociale** | Google Calendar, `Friend` | Ricorda le sedute dallo psicologo, suggerisce uscite con gli amici | da fare |
 | **Apprendimento** | `Course`, `StudySession` | Pianifica il tempo di studio nei corsi | da fare |
 
@@ -69,7 +69,8 @@ LifeOS è un'**app personale** che aiuta a organizzare la vita quotidiana (sport
 | Database | SQLite | — | un singolo file, `lifeos.db` |
 | Accesso al DB | Entity Framework Core | 9.0.22 | `Microsoft.EntityFrameworkCore.Sqlite` + `.Design` |
 | Agenti | Microsoft Agent Framework | 1.27.0 | pacchetto `Microsoft.Agents.AI` |
-| Modello IA | Anthropic API, Claude Haiku | — | connettore: `Microsoft.Agents.AI.Anthropic` 1.27.0 (porta l'SDK ufficiale `Anthropic` 12.53.0 e `Microsoft.Extensions.AI` 10.10.0); registrato in `Program.cs` come `IChatClient`, modello `claude-haiku-5-5` (in `appsettings.json` → `Anthropic:Model`); provato con `/api/ping-ai` |
+| Modello IA | Anthropic API, Claude Haiku | — | connettore: `Microsoft.Agents.AI.Anthropic` 1.27.0 (porta l'SDK ufficiale `Anthropic` 12.53.0 e `Microsoft.Extensions.AI` 10.10.0); registrato in `Program.cs` come `IChatClient`, modello `claude-haiku-5-5` (in `appsettings.json` → `Anthropic:Model`), limite risposta `Anthropic:MaxOutputTokens` = 8000 (non abbassarlo: vedi #18); provato con `/api/ping-ai` |
+| Markdown → HTML | Markdig | 1.5.1 | nel progetto `LifeOS.Web`, per mostrare le risposte dell'agente nella chat |
 | Lettura CSV | CsvHelper | 33.0.1 | usato da `GoodreadsImportService` per leggere l'export di Goodreads |
 | Documentazione API | OpenAPI | 9.0.22 | disponibile su `/openapi/v1.json` in Development |
 | UI | Bootstrap | (incluso in `wwwroot/lib`) | template di default |
@@ -95,18 +96,19 @@ LifeOS/
 │   ├── appsettings.Development.json ← configurazione solo in sviluppo
 │   ├── Properties/launchSettings.json ← porte e profili di avvio
 │   ├── Agents/                ← un file per agente + orchestratore (oggi: BookAgent.cs e i suoi strumenti BookTools.cs)
-│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books e /api/books/import; AiEndpoints.cs → /api/agents/books?question=... e /api/ping-ai, quest'ultimo è una prova temporanea da eliminare)
-│   ├── Models/                ← classi che rappresentano le tabelle del DB
+│   ├── Endpoints/             ← un file per area con gli endpoint HTTP (oggi: BookEndpoints.cs → /api/books e /api/books/import; ReaderEndpoints.cs → GET /api/readers e POST /api/readers/{nome}/import; PendingEndpoints.cs → /api/pending/{id}/confirm|reject; AiEndpoints.cs → POST /api/agents/books (conversazione) e GET /api/ping-ai, quest'ultimo è una prova temporanea da eliminare)
+│   ├── Models/                ← classi che rappresentano le tabelle del DB (le challenge: Challenge astratta + CountChallenge, AlphabetChallenge; ChallengeProgress è solo il risultato di un calcolo)
+│   ├── Dtos/                  ← classi che servono solo a trasportare dati tra frontend e API, non sono tabelle (oggi: ChatMessageDto, ProposalDto, AgentReply)
 │   ├── Data/                  ← LifeOSDbContext + Migrations/ (migrazioni generate da EF: non modificarle a mano)
-│   └── Services/              ← integrazioni esterne (oggi: GoodreadsImportService.cs = import CSV); in futuro Google Calendar, client Anthropic
+│   └── Services/              ← integrazioni esterne (oggi: GoodreadsImportService.cs = import CSV; PendingActionService.cs = crea/conferma/rifiuta le modifiche proposte dagli agenti); in futuro Google Calendar, client Anthropic
 │
 └── LifeOS.Web/                ← FRONTEND (Blazor WebAssembly, ancora template di default)
     ├── Program.cs             ← avvio dell'app nel browser, registra HttpClient
     ├── App.razor              ← router: decide quale pagina mostrare per ogni URL
     ├── _Imports.razor         ← "using" comuni a tutte le pagine
     ├── Layout/                ← struttura della pagina (menu laterale, layout)
-    ├── Models/                ← classi dei dati come li vede il frontend (oggi: BookItem, ImportResultItem)
-    ├── Pages/                 ← pagine: Home (template), Books (/books: elenco, aggiunta libri e import CSV Goodreads)
+    ├── Models/                ← classi dei dati come li vede il frontend (oggi: BookItem, ImportResultItem, ChatMessageItem, ChatReplyItem, ProposalItem)
+    ├── Pages/                 ← pagine: Home (template), Books (/books: elenco, aggiunta libri, import CSV Goodreads tuo e di un'altra persona, es. Fra), Chat (/chat: conversazione con l'agente Libri)
     └── wwwroot/               ← file statici: index.html, appsettings.json (ApiBaseUrl), CSS, icone, Bootstrap
 ```
 
@@ -135,7 +137,13 @@ Il database è un file SQLite (`lifeos.db`). Il percorso è definito in `appsett
 |---|---|---|---|---|
 | `MealLog` | `MealLogs` | Cibo | `EatenAt`, `Type` (Breakfast/Lunch/Dinner/Snack), `Description` (max 500), `Calories?`, `Notes?` | indice su `EatenAt` |
 | `MenstrualCycle` | `MenstrualCycles` | Sport | `StartDate`, `PeriodEndDate?`, `CycleLengthDays?`, `Notes?` | `StartDate` unico; un record = un ciclo |
-| `Book` | `Books` | Libri | `GoodreadsId?`, `Title`, `Author`, `Isbn13?`, `Pages?`, `MyRating` (`decimal` 0–5, anche 3.5 o 2.25), `Status` (ToRead/Reading/Read), `DateAdded?`, `DateRead?` | `GoodreadsId` unico → evita duplicati reimportando il CSV |
+| `Book` | `Books` | Libri | `GoodreadsId?`, `Title`, `Author`, `AuthorLastFirst?` ("Cognome, Nome", colonna "Author l-f" del CSV), `Isbn13?`, `Pages?`, `MyRating` (`decimal` 0–5, anche 3.5 o 2.25), `Status` (ToRead/Reading/Read), `DateAdded?`, `DateRead?` | `GoodreadsId` unico → evita duplicati reimportando il CSV |
+| `Challenge` (astratta) → `CountChallenge`, `AlphabetChallenge` | `Challenges` (tabella unica, TPH) | Libri | `Name`, `Year`, `CreatedAt`, `Kind` (colonna discriminante: `Count`/`Alphabet`), `TargetBooks?` (solo Count) | metodo astratto `Evaluate(libriLettiNellAnno, oggi)` → `ChallengeProgress`; `IsGoalReached()`. Al massimo una per tipo per anno (controllo in `PendingActionService`). Scritte solo dopo conferma (`PendingAction`). Alfabeto: iniziale del **cognome**, 26 lettere A-Z, accenti ignorati |
+| `CompetitiveChallenge` (sottoclasse di `Challenge`) | `Challenges` (`Kind` = `Competitive`) | Libri | `OpponentId` → `Reader` (Restrict), `Items` | sfida contro un'altra persona su una lista fissa con punti per libro, anno solare; vince chi ha più punti a fine anno |
+| `ChallengeListItem` | `ChallengeListItems` | Libri | `ChallengeId`, `Title`, `Author?`, `Points` (`decimal`, 0,5–10, 5 se non indicato), `AnyBookByAuthor` | libro della lista di una sfida; eliminando la sfida si elimina la lista (cascade). Regole di `BookMatching`: senza autore → titolo normalizzato identico (senza accenti, maiuscole, punteggiatura, sottotitolo); con autore → cognome presente nell'autore letto **e** un titolo è l'inizio (o la fine) dell'altro ("Jurassic Park (Jurassic Park, #1)", "M. Il figlio del secolo"); `AnyBookByAuthor` → vale un libro qualsiasi di quell'autore (es. Asimov). L'autore serve anche a escludere edizioni diverse (Ben-Hur per ragazzi di Dirk Maggs ≠ Lew Wallace) |
+| `Reader` | `Readers` | Libri | `Name` (unico, max 100) | un'altra persona che legge (es. Fra); creata confermando una sfida o una sua lettura, o importando il suo CSV |
+| `ReaderBook` | `ReaderBooks` | Libri | `ReaderId`, `GoodreadsId?`, `Title`, `Author`, `AuthorLastFirst?`, `Pages?`, `MyRating`, `Status`, `DateRead?`, `DateAdded?` | i libri di un `Reader`, separati da `Books`; un libro letto **senza** `DateRead` conta per l'anno di `DateAdded` (data di registrazione in chat o "Date Added" del CSV); indice unico (`ReaderId`, `GoodreadsId`) per reimportare senza duplicati. `Book` e `ReaderBook` implementano `IReadingRecord` |
+| `PendingAction` | `PendingActions` | tutti gli agenti | `Type` (SetChallengeGoal, CreateAlphabetChallenge, CreateCompetitiveChallenge, AddChallengeItem, AddReaderBook), `PayloadJson`, `Summary`, `Status` (Pending/Confirmed/Rejected), `CreatedAt`, `ResolvedAt?` | modifiche proposte dagli agenti in attesa di conferma (§12.1 regola 2); indice su `Status` |
 | `Friend` | `Friends` | Sociale | `Name`, `LastSeen?`, `DesiredFrequencyDays?`, `Interests?`, `Notes?` | |
 | `Course` | `Courses` | Apprendimento | `Title`, `Topic`, `Platform`, `TotalHours`, `IsCompleted` | ha molte `StudySession` |
 | `StudySession` | `StudySessions` | Apprendimento | `CourseId`, `ScheduledStart`, `PlannedMinutes`, `ActualMinutes?`, `IsCompleted`, `Notes?` | eliminando un corso si eliminano le sue sessioni (cascade) |
@@ -149,6 +157,12 @@ Una **migrazione** è uno script generato automaticamente che crea o modifica le
 |---|---|
 | `20261102133805_InitialCreate` | Crea le 6 tabelle (MealLogs, MenstrualCycles, Books, Friends, Courses, StudySessions) e i relativi indici. |
 | `MakeBookRatingDecimal` | Cambia `Books.MyRating` da intero a `decimal` (in SQLite è salvato come testo). Applicata il 2026-11-03. |
+| `AddReadingChallenge` | Crea la tabella `ReadingChallenges` con indice unico su `Year`. Applicata il 2026-11-03. |
+| `AddPendingActions` | Crea la tabella `PendingActions` (proposte in attesa di conferma). Applicata il 2026-11-03. |
+| `ChallengeHierarchy` | Crea `Challenges` (TPH), aggiunge `Books.AuthorLastFirst`, **copia** gli obiettivi da `ReadingChallenges` come challenge `Count` e poi elimina `ReadingChallenges`. **Modificata a mano** (vedi §8). Applicata il 2026-11-03: l'obiettivo 60/2026 è stato conservato. |
+| `CompetitiveChallenge` | Crea `Readers`, `ReaderBooks`, `ChallengeListItems` e la colonna `Challenges.OpponentId`. Applicata il 2026-11-04. |
+| `DecimalChallengePoints` | `ChallengeListItems.Points` da intero a decimale, `Author` facoltativo. Applicata il 2026-11-04 (tabella vuota). |
+| `ListItemAnyAuthorAndReaderDateAdded` | Aggiunge `ChallengeListItems.AnyBookByAuthor` e `ReaderBooks.DateAdded`. Applicata il 2026-11-04. |
 
 I file in `Migrations/` sono tre: la migrazione (`..._InitialCreate.cs`), il suo `.Designer.cs` e `LifeOSDbContextModelSnapshot.cs` (fotografia dei modelli, usata da EF per calcolare la differenza alla prossima migrazione). Vanno **committati** su git. Il file `lifeos.db` invece **no** (è già nel `.gitignore`). EF crea anche due tabelle di servizio, `__EFMigrationsHistory` (migrazioni già applicate) e `__EFMigrationsLock` (blocco temporaneo durante l'applicazione).
 Il database è stato creato (`dotnet ef database update`) il 2026-11-02; per ricrearlo da zero basta cancellare `lifeos.db*` (solo con conferma dell'utente, vedi §10) e rieseguire il comando.
@@ -316,7 +330,11 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-02 | Endpoint in file dedicati (`Endpoints/<Area>Endpoints.cs`) invece che tutti in `Program.cs` | `Program.cs` resta corto e leggibile man mano che le aree crescono. |
 | 2026-11-03 | Import Goodreads con la libreria CsvHelper invece di un lettore CSV scritto a mano | Il CSV di Goodreads ha campi tra virgolette con virgole e a capo (es. recensioni): un `Split(',')` li romperebbe. |
 | 2026-11-03 | `Book.MyRating` come `decimal` e non `int` | Nel CSV di Goodreads i voti hanno mezze stelle e decimali (3.5, 2.25): con un intero si perdevano. Attenzione: SQLite salva i `decimal` come testo, quindi `Sum`/`Average` sui voti non si possono fare nella query EF (vanno calcolati in memoria dopo `ToListAsync()`). |
+| 2026-11-03 | La cronologia della chat sta nel browser e viene rimandata all'API a ogni messaggio (`POST /api/agents/books` con la lista dei messaggi); l'API ne tiene solo gli ultimi 20 e ne limita la lunghezza (4000 caratteri) | L'API resta senza stato (niente tabella o sessioni da gestire) e l'agente "ricorda" comunque la conversazione. Limite: ricaricando la pagina la conversazione si perde. Il tetto di 20 messaggi contiene i costi. |
+| 2026-11-03 | Risposte dell'agente mostrate con Markdig e `DisableHtml()` | Claude scrive in Markdown; l'HTML grezzo viene ignorato così nessun testo (es. un titolo di libro) può inserire codice nella pagina. |
 | 2026-11-03 | `.DisableAntiforgery()` su `POST /api/books/import` | .NET richiede un token antiforgery per i moduli con file; qui non servono perché l'API non usa cookie di login e accetta solo il frontend (CORS). Da rivedere se si aggiunge l'autenticazione. |
+| 2026-11-03 | Challenge come classe astratta `Challenge` con sottoclassi, in **una sola tabella** (TPH, colonna `Kind`) | Pochi campi specifici per tipo; un'unica query elenca tutte le challenge. Ogni sottoclasse calcola da sola il suo stato (`Evaluate`): i conti li fa il codice, non l'IA. Se i tipi crescono molto si può passare a tabelle separate con una migrazione. |
+| 2026-11-03 | Migrazione `ChallengeHierarchy` **modificata a mano** (eccezione alla regola §3 "non modificare le migrazioni") | EF generava un `DropTable` di `ReadingChallenges` prima di tutto, perdendo gli obiettivi salvati. Aggiunto un `Sql(INSERT … SELECT …)` e spostato il `DropTable` in fondo. Regola: **controllare sempre** le migrazioni che EF segnala con "may result in the loss of data". |
 | 2026-11-02 | Indirizzo dell'API in `LifeOS.Web/wwwroot/appsettings.json`, non nel codice | Si cambia (es. in produzione) senza toccare il C#. Non metterci segreti: il file è pubblico, scaricato dal browser. |
 
 ---
@@ -329,20 +347,26 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 
 | # | Problema | Effetto | Soluzione proposta |
 |---|---|---|---|
-| 15 | **Endpoint `GET /api/ping-ai` e `GET /api/agents/books`** (`Endpoints/AiEndpoints.cs`) senza autenticazione: chiunque raggiunga l'API può chiamarli e far spendere token. `/api/agents/books` è un `GET` solo per comodità di prova dal browser. | Costo piccolo in locale, ma da chiudere prima di esporre l'API su internet. | Eliminare `/api/ping-ai` (inutile ora che l'agente funziona); sostituire `/api/agents/books` con l'orchestratore e un `POST`; aggiungere autenticazione. |
+| 15 | **Endpoint `GET /api/ping-ai` e `GET /api/agents/books`** (`Endpoints/AiEndpoints.cs`) senza autenticazione: chiunque raggiunga l'API può chiamarli e far spendere token. Ora `/api/agents/books` è un `POST` usato dalla pagina `/chat`. | Costo piccolo in locale, ma da chiudere prima di esporre l'API su internet. | Eliminare `/api/ping-ai` (inutile ora che l'agente funziona); sostituire `/api/agents/books` con l'orchestratore; aggiungere autenticazione. |
 | 16 | **Scadenza della chiave API Anthropic** circa 2027-02-01. | Dopo quella data le chiamate IA falliscono (errore 401). | Creare una nuova chiave e rieseguire `dotnet user-secrets set "Anthropic:ApiKey" ... --project LifeOS.Api`. |
 | 6 | **`UseHttpsRedirection` con profilo `http`**. | Avviso nei log "Failed to determine the https port"; nessun effetto pratico. | Avviare con `--launch-profile https` oppure attivare il redirect solo fuori da Development. |
 | 8 | **Modelli condivisi assenti**: i modelli stanno solo in `LifeOS.Api`. | Il frontend ridefinisce le stesse classi (già successo con `Web/Models/BookItem`, copia semplificata di `Book`: se cambia `Book`, aggiornarla a mano). | Creare un progetto `LifeOS.Shared` per i DTO usati da entrambi. |
-| 9 | **Modelli mancanti** per alcune funzioni: obiettivo annuale della reading challenge, allenamenti pianificati, sedute dallo psicologo (oggi previste solo da calendario). | Gli agenti non hanno dove salvare questi dati. | Valutare `ReadingChallenge` (anno, obiettivo), `Workout`, eventuale `TherapySession`. |
+| 9 | **Modelli mancanti** per alcune funzioni: allenamenti pianificati, sedute dallo psicologo (oggi previste solo da calendario). (Le challenge di lettura ci sono dal 2026-11-03: `Challenge` e sottoclassi.) | Gli agenti Sport e Sociale non hanno dove salvare questi dati. | Valutare `Workout` ed eventuale `TherapySession`. |
 | 10 | **Integrazione Google Calendar assente**. | Agenti Sport, Cibo e Sociale non possono leggere gli impegni. | Pacchetto `Google.Apis.Calendar.v3` + OAuth, servizio in `Services/`. |
 | 11 | **Dati sensibili** (ciclo mestruale, salute, terapia) inviati all'API Anthropic. | Questione di privacy. | Inviare all'IA solo i dati minimi necessari (es. "fase del ciclo: follicolare" invece dello storico completo). Non esporre l'API su internet senza autenticazione. |
 | 12 | **Nessun test automatico**. | Le regressioni si scoprono solo a mano. | Aggiungere un progetto `LifeOS.Api.Tests` (xUnit) quando c'è logica da testare. |
+| 20 | **Cognome degli autori impreciso finché non si reimporta il CSV**: `Books.AuthorLastFirst` è vuoto per i libri già importati, quindi la challenge alfabeto usa l'ultima parola dell'autore (saltando Jr./Sr./II…). | Cognomi composti sbagliati, es. Carlos Ruiz Zafón → Z invece di R. | Reimportare il CSV di Goodreads da `/books`: l'import ora legge "Author l-f". |
+| 21 | **Riconoscimento dei libri della sfida per titolo**: un libro della lista "conta" solo se il titolo letto coincide (ignorando maiuscole, accenti, punteggiatura e sottotitolo). | Se tu o Fra leggete un'edizione con titolo diverso (es. tradotto: "Il nome della rosa" vs "The Name of the Rose") il libro non viene contato. | Aggiungere alla lista il titolo come compare su Goodreads; in futuro collegare gli elementi della lista a un ISBN o a più titoli alternativi. Caso noto nella sfida 2026: "Asimov (Fondazione / Destinazione cervello)" non coincide con nessun titolo reale. |
+| 22 | **Mancano rimozione e modifica** di libri della lista, di letture di Fra e di challenge. | Un errore confermato per sbaglio si corregge solo a mano nel DB. | Aggiungere proposte `Remove...`/`Update...` con lo stesso meccanismo di conferma. |
 | 13 | **Frontend non personalizzato**: titolo "LifeOS.Web", `lang="en"`, testi in inglese. | Aspetto da template. | Aggiornare `index.html` (`lang="it"`, titolo "LifeOS") e i testi. |
 
 ### Risolti
 
 | # | Problema | Soluzione | Data |
 |---|---|---|---|
+| 19 | Chat: errore 400 "Messaggi non validi" dopo risposte vuote (#18) o lunghe (>4000 caratteri) dell'agente: l'API rifiutava la cronologia rimandata dal browser | In `POST /api/agents/books` il limite di 4000 caratteri e il controllo "non vuoto" valgono solo per la nuova domanda; nella cronologia le risposte vuote si scartano e quelle lunghe si accorciano a 4000. Provato con cronologia contenente un messaggio vuoto e uno da 5000 caratteri | 2026-11-03 |
+| 18 | Con domande complesse (es. "prospetto di lettura per due mesi") l'agente rispondeva **a vuoto** circa 4 volte su 10: dopo aver chiamato gli strumenti il modello si fermava senza scrivere il testo (nei log, ultimo messaggio con solo ragionamento vuoto) | **Causa vera:** il limite predefinito di token in uscita del connettore Anthropic è basso (~1000); il modello lo esauriva ragionando e il testo usciva vuoto o tagliato. **Soluzione:** `AsIChatClient(model, maxTokens)` in `Program.cs` con `Anthropic:MaxOutputTokens` = 8000 in `appsettings.json`. Reti di sicurezza in `BookAgent.AskAsync`: un secondo tentativo se il testo è vuoto (non se è stata creata una proposta), poi una chiamata senza strumenti con i dati già letti, infine un messaggio di cortesia. Provato: 6 prospetti su 6 completi (9-14 s) | 2026-11-03 |
+| 17 | `SetChallengeGoal` scriveva senza conferma nel codice (il "chiedi prima" era solo un'istruzione al modello) | Sostituito da `ProposeChallengeGoal`, che crea solo una `PendingAction`; la modifica avviene in `PendingActionService.ConfirmAsync` (`POST /api/pending/{id}/confirm`), chiamato dal pulsante Conferma della chat. Provato: prima della conferma la challenge non esiste, dopo sì; confermare/rifiutare due volte → 409, id inesistente → 404 | 2026-11-03 |
 | 2 | Mancava il connettore Anthropic: gli agenti non potevano chiamare Haiku | Pacchetto `Microsoft.Agents.AI.Anthropic` 1.27.0; in `Program.cs` un `IChatClient` singleton creato alla prima richiesta (chiave da user-secrets `Anthropic:ApiKey`, modello da `Anthropic:Model`). Verificato: `GET /api/ping-ai` → 200 `{"answer":"Ciao"}` | 2026-11-03 |
 | 3 | CORS non configurato nell'API (il browser bloccava le chiamate dal frontend) | `AddCors` con policy `Frontend` (origini `http://localhost:5222` e `https://localhost:7232`) + `app.UseCors("Frontend")` in `Program.cs`. Verificato: l'API risponde con `Access-Control-Allow-Origin`. Se cambiano le porte del Web, aggiornare l'elenco | 2026-11-02 |
 | 4 | `HttpClient` del frontend puntava al frontend stesso | `BaseAddress` ora letto da `wwwroot/appsettings.json` → `ApiBaseUrl` (`http://localhost:5219`); se manca la chiave l'app si ferma con un errore chiaro | 2026-11-02 |
@@ -392,4 +416,105 @@ LifeOS.Api ──► Orchestratore ──► Agenti (Sport, Cibo, Libri, Sociale
 | 2026-11-03 | Commit `f59cd91` (import CSV, voto decimale, pulsante). Creata la chiave API Anthropic (scadenza 90 giorni, circa 2027-02-01) e salvata con `dotnet user-secrets` (`UserSecretsId` aggiunto a `LifeOS.Api.csproj`: non è un segreto). Aggiunto `Microsoft.Agents.AI.Anthropic` 1.27.0. Build: 0 errori, 0 avvisi. |
 | 2026-11-03 | Registrato l'`IChatClient` Anthropic in `Program.cs`, aggiunto `Anthropic:Model` (`claude-haiku-5-5`) in `appsettings.json`, creato `Endpoints/AiEndpoints.cs` con `GET /api/ping-ai` (prova temporanea). Provato: Haiku risponde. Risolto #2; aperti #15 (eliminare la prova) e #16 (scadenza chiave). Build: 0 errori, 0 avvisi. |
 | 2026-11-03 | Primo agente: `Agents/BookAgent.cs` (istruzioni in italiano, data di oggi, "usa sempre gli strumenti") e `Agents/BookTools.cs` con due strumenti di sola lettura su `Books` (`GetYearSummary`, `GetBooksByStatus`); endpoint `GET /api/agents/books?question=...`. Provato con domande vere: "libri letti nel 2025" → 36 libri, 8130 pagine, voto medio 3,92, numeri **verificati sul CSV**; "libri in lettura" → elenco corretto. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Reading challenge: modello `ReadingChallenge` (`Year` unico, `TargetBooks`), `DbSet` e indice in `LifeOSDbContext`, migrazione `AddReadingChallenge` applicata. Nuovi strumenti in `BookTools`: `GetChallengeProgress` (obiettivo, letti, ritmo atteso a oggi, differenza) e `SetChallengeGoal` (**primo strumento che scrive nel DB**, validato 1–1000). Istruzioni di `BookAgent` aggiornate. Provato in sola lettura: senza obiettivo l'agente lo chiede invece di inventarlo. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Interfaccia di chat: nuova pagina `Pages/Chat.razor` (`/chat`) con `Chat.razor.css`, link "Chat" nel menu, modelli `ChatMessageItem` e `ChatReplyItem`, pacchetto Markdig 1.5.1. Backend: nuova cartella `Dtos/` con `ChatMessageDto`; `BookAgent.AskAsync` ora riceve la conversazione; `/api/agents/books` passa da `GET` a `POST` con validazione (ruoli, lunghezza, ultimi 20 messaggi). Provato via curl: la memoria funziona ("E nel 2024?" capita) e i dati non validi danno 400. Build: 0 errori, 0 avvisi. **La pagina non è ancora stata provata nel browser.** |
+| 2026-11-03 | Scritta la §12 (specifica dell'agente Libri: cosa deve saper fare, principi, fasi, punti aperti). **Solo documentazione: nessuna modifica al codice.** Aperto #17 (`SetChallengeGoal` non rispetta ancora la regola "proponi e conferma"). |
+| 2026-11-03 | Ampliata la §12 con le note sulle challenge (numero 60 nel 2026, alfabeto, competitiva con Fra), gerarchia `Challenge` con sottoclassi, confronto con Fra, prospetti a meno pagine possibili; aggiunta §12.7 (Home e data visualization). **Solo documentazione.** |
+| 2026-11-03 | Fase 1a: meccanismo proponi/conferma. Nuovi `Models/PendingAction.cs`, `Services/PendingActionService.cs`, `Endpoints/PendingEndpoints.cs` (`POST /api/pending/{id}/confirm` e `/reject`), `Dtos/ProposalDto.cs` (+`AgentReply`), migrazione `AddPendingActions` applicata. `SetChallengeGoal` → `ProposeChallengeGoal` (non scrive); `BookAgent.AskAsync` ora restituisce `AgentReply` e `/api/agents/books` risponde `{answer, proposals}`. Frontend: `ProposalItem`, pulsanti Conferma/Rifiuta in `Chat.razor`. Provato via API (dati di prova rimossi dal DB). Risolto #17. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Corretto il bug delle risposte vuote dell'agente Libri (#18, vedi "Risolti"): nuovi tentativi in `BookAgent.AskAsync`. Build: 0 errori, 0 avvisi. |
+| 2026-11-04 | Sfida con Fra completata con le regole dell'utente: punti 0,5–10 (5 di default); autori ricavati dai titoli (ortografia di Goodreads dove il libro è in libreria; vuoti per Delitto e castigo, Il massacro di Dio, L'energetismo segreto della vita); voce "Un libro qualsiasi di Isaac Asimov" (`AnyBookByAuthor`); aggiunti "La vita istruzioni per l'uso" (5) e "M. Il figlio del secolo" (8), ignorato "L'invenzione di Morel"; Ben-Hur con autore Lew Wallace (la versione per ragazzi letta dall'utente non vale). `BookMatching` ora accetta titoli che iniziano/finiscono con quello della lista se l'autore coincide. Date facoltative per i libri di Fra (`ReaderBook.DateAdded`). Registrati i 9 libri di Fra senza data. Migrazione `ListItemAnyAuthorAndReaderDateAdded` applicata. Verifica: Eli 26, Fra 39 (il foglio dell'utente dice 37,5 ma la somma dei suoi 9 libri è 39). Lista: 58 libri, 273 punti. Build: 0 errori, 0 avvisi. |
+| 2026-11-04 | `ChallengeListItem.Points` da `int` a `decimal` (0,5–100: i punteggi reali sono 1,5, 6,5…) e `Author` facoltativo (la lista reale ha solo titoli: si confronta per titolo). Migrazione `DecimalChallengePoints` applicata (tabella vuota, nessun dato perso). Caricata con uno script (su richiesta dell'utente, non dall'agente) la **Sfida 2026 contro Fra**: 56 libri, 260 punti totali; 3 libri senza punteggio esclusi. Verifica: il codice riconosce da solo i 7 libri dell'utente (26 punti, come nel suo foglio) più Ben-Hur (letto il 2026-01-29, da chiarire). Letture di Fra ancora da inserire (servono le date). Build: 0 errori, 0 avvisi. |
+| 2026-11-04 | Fase 5a, sfida competitiva: nuovi modelli `CompetitiveChallenge`, `ChallengeListItem`, `Reader`, `ReaderBook`, `IReadingRecord`, `ChallengeContext`, `BookMatching`; `Challenge.Evaluate` ora riceve un `ChallengeContext` (tuoi libri + libri delle avversarie + oggi). Nuovi `PendingActionType`: CreateCompetitiveChallenge, AddChallengeItem, AddReaderBook. Strumenti: `GetReaderYearSummary`, `GetCatchUpOptions`, `ProposeCompetitiveChallenge`, `ProposeChallengeItem`, `ProposeReaderBook`. `GoodreadsImportService` diviso in lettura righe + `ImportAsync`/`ImportForReaderAsync`; nuovo `Endpoints/ReaderEndpoints.cs`; in `/books` import del CSV di un'altra persona. Migrazione `CompetitiveChallenge` applicata. Provato via API (sfida 2025 contro "Prova": 3 libri in lista, 2 letture, punteggio 8–15, piano di recupero corretto); dati di prova cancellati. Aperti #21, #22. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Fase 1b: nuovi `Models/Challenge.cs` (astratta), `CountChallenge.cs`, `AlphabetChallenge.cs`, `ChallengeProgress.cs`; eliminato `Models/ReadingChallenge.cs`. `Book.AuthorLastFirst` letto dalla colonna "Author l-f" nell'import. Nuovo `PendingActionType.CreateAlphabetChallenge`. Strumenti: `GetChallengeProgress` (tutte le challenge dell'anno), `GetBooksForMissingLetters`, `ProposeAlphabetChallenge`. Migrazione `ChallengeHierarchy` (modificata a mano, §8) applicata: 60/2026 conservato. Provato via API: proposta → conferma → creata la challenge "Alfabeto 2026" (15/26 lettere); consigli per le lettere mancanti corretti. Aperto #20. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Trovata la causa vera delle risposte vuote (#18): limite di token troppo basso. Aggiunto `Anthropic:MaxOutputTokens` (8000) e una chiamata di riserva senza strumenti in `BookAgent`. Build: 0 errori, 0 avvisi. |
+| 2026-11-03 | Corretto l'errore 400 della chat con cronologia vuota/lunga (#19): validazione in `AiEndpoints.cs` resa tollerante sulla cronologia. Build: 0 errori, 0 avvisi. |
 | 2026-11-02 | Risolti problemi #3 (CORS) e #4 (`HttpClient`); creati endpoint `GET`/`POST /api/books` (`Endpoints/BookEndpoints.cs`), pagina `Books.razor` (`/books`) con `Models/BookItem.cs`, link "Libri" nel menu; rimosso il codice demo (#5). Verificato: API avviata, `GET /api/books` → 200 con CORS corretto. Build: 0 errori, 0 avvisi. |
+
+---
+
+## 12. Specifica degli agenti (cosa vogliamo che facciano)
+
+> **Perché questa sezione:** raccoglie le idee e le decisioni di *prodotto* prima di scrivere il codice, così non vanno perse. È una **specifica, non lo stato dei lavori**: ciò che è scritto qui non è (ancora) implementato, salvo dove indicato. Per lo stato reale vedi §1, §9 e §11.
+> Ogni agente nuovo va descritto con lo stesso schema: domande che deve saper gestire, autonomia, fonti, fasi, punti aperti.
+
+### 12.1 Principi comuni a tutti gli agenti
+
+1. **Giudizio all'IA, conti al codice.** Claude decide, consiglia, scrive; i calcoli (punteggi, conteggi, lettere coperte, ritmo di lettura, confronti) li fanno strumenti C# deterministici. L'agente chiama lo strumento e commenta il risultato: i modelli linguistici sbagliano i conti.
+2. **Proponi e conferma.** L'agente **non scrive mai** nel database di sua iniziativa. Uno strumento di scrittura crea solo una **proposta in sospeso** ("aggiungo la challenge X?") e la modifica avviene solo quando l'utente preme **Conferma** nell'interfaccia. Il permesso è quindi una regola del codice e non un'istruzione al modello (che potrebbe non rispettarla). Eccezioni: nessuna senza decisione esplicita dell'utente.
+3. **Proattivo ma non invadente.** I suggerimenti spontanei partono da un processo pianificato (un agente non si sveglia da solo), con: massimo **un suggerimento a settimana**, solo se c'è qualcosa di notevole (per esempio ritardo oltre una soglia), e un'impostazione per spegnerlo. I suggerimenti si salvano e si mostrano in una sezione dell'app; non interrompono.
+4. **Strumenti minimi.** Ogni agente ha solo gli strumenti che gli servono (§6). Preferire strumenti di sola lettura; quelli che scrivono toccano un campo preciso, con controlli (vedi regola 2).
+5. **Dati sensibili.** Vale il problema #11: all'IA solo i dati minimi necessari.
+
+### 12.2 Agente Libri — domande che deve saper gestire
+
+*Consigli e scelte*
+- "Che libro leggo dopo?" · "Consigliami qualcosa di breve per questo weekend."
+- "In base ai libri che mi sono piaciuti, cosa mi consigli?"
+- "Consigliami qualcosa di simile a Lorenz, Sacks, Feynman, Peter Smith…"
+- "Dimmi 15 libri non famosi e belli, anche in base ai miei gusti."
+- "Consigliami altre challenge."
+
+*Challenge e pianificazione*
+- "Sono in pari con la challenge?"
+- "Fammi un prospetto del prossimo mese per andare in pari con la challenge del numero di libri, integrando libri che mi facciano avanzare anche nelle altre challenge."
+- "Quali libri brevi e veloci posso leggere per vincere la challenge X, abbinandoli a libri corposi per vincere le altre?"
+- "Fammi un prospetto di lettura per il 2027 e consigliami il nuovo numero di libri per la challenge."
+- "Aggiungi questa challenge: …" (con conferma, regola 2). Tipi previsti:
+  - **a numero** (es. N libri nell'anno; fatto: `CountChallenge`);
+  - **a punti**: lista di libri, ognuno con un punteggio;
+  - **competitiva**: a punti contro un'altra persona, di cui l'utente ha le statistiche di lettura;
+  - **alfabeto**: un autore per ogni lettera.
+- **Dettagli aggiunti il 2026-11-03** (volontà dell'utente):
+  - Challenge concrete: (a) **numero di libri** (per il 2026: **60**); (b) **alfabeto** (un autore con iniziale diversa per ogni lettera); (c) **competitiva con "Fra"** (un altro utente): ci si sfida a leggere **più libri possibile da una lista fissata**; dell'utente servono le **statistiche** di Fra.
+  - **Modello dati (idea):** una classe base `Challenge` con una sottoclasse per tipo (`CountChallenge`, `AlphabetChallenge`, `CompetitiveChallenge`…), con metodo astratto `ObiettivoRaggiunto()` (in codice: `IsGoalReached()`); a livello di DB, ereditarietà EF Core (TPH, colonna "tipo"). Lo stato di ogni challenge lo calcola il codice (regola 12.1.1).
+  - **Inserimento libero via chat:** l'utente può creare/modificare challenge in linguaggio naturale; l'agente le **propone** e le salva solo dopo conferma (regola 12.1.2).
+  - **Confronto con Fra:** statistiche di Fra vs. dell'utente, anche con **visualizzazioni grafiche**; domande tipo "quanto sono indietro rispetto a lui?" e "fammi un prospetto per recuperare".
+  - **Prospetto ottimizzato:** "libri da leggere il prossimo mese per recuperare **tutte** le challenge leggendo **meno pagine possibili**" (calcolo di ottimizzazione fatto dal codice, l'agente lo commenta).
+  - **Libri di Fra:** poter **aggiungere libri alla lista/letture di Fra** dalla chat (sempre con conferma). Serve un modo per rappresentare le letture di Fra (es. `Reader`/`Participant` + sue letture).
+
+### 12.3 Autonomia, fonti e tono
+
+- **Autonomia:** risponde e **propone**; scrive solo dopo conferma (12.1 punto 2). Nessuna azione irreversibile.
+- **Proattività:** sì, con i limiti di 12.1 punto 3 (prospetti, avvisi di ritardo, riepilogo mensile e di fine anno).
+- **Fonti interne:** `Books` (anche i circa 337 libri "da leggere"), voti, date, challenge.
+- **Fonti esterne:** deve poter fare ricerche su internet, basandosi soprattutto su blogger e youtuber indicati dall'utente (tra cui **Matteo Fumagalli**). Limite: l'agente legge testo e non guarda i video, quindi per YouTube servono trascrizioni o pagine di accompagnamento; **da verificare** cosa pubblica ogni fonte in forma leggibile prima di promettere il suo uso.
+- **Metadati dei libri** (genere, trama, temi): il CSV di Goodreads non li contiene; valutare una fonte gratuita come Open Library o Google Books, più economica e precisa di una ricerca web a ogni richiesta.
+
+### 12.4 Funzioni aggiuntive concordate (tutte volute dall'utente)
+
+1. **Prima la pila esistente:** prima di consigliare libri nuovi, proporre dai "da leggere" già posseduti.
+2. **Profilo dei gusti** ricavato dai voti (autori e temi amati o bocciati), usato in tutti i consigli.
+3. **Libri abbandonati:** un modo per segnarli, per non riproporre cose simili.
+4. **Riepilogo mensile e di fine anno** ("il tuo anno di lettura").
+5. **Varietà:** avvisare se si leggono sempre lo stesso genere, gli stessi autori o paesi (utile per le challenge tipo alfabeto).
+6. **Collegamento col calendario** (futuro, con l'agente Sociale/orchestratore): proporre il libro breve per il weekend libero.
+
+### 12.5 Fasi di sviluppo (ognuna utilizzabile da sola)
+
+| Fase | Contenuto | Stato |
+|---|---|---|
+| 1a | Meccanismo **proponi/conferma** con pulsanti nella chat (`PendingAction`, `PendingActionService`, `/api/pending`) | **fatto** (2026-11-03; pulsanti nel browser non ancora provati a mano) |
+| 1b | Challenge multiple: classe base `Challenge` + `CountChallenge` e `AlphabetChallenge` in tabella unica (TPH), migrazione dei dati, strumenti `GetChallengeProgress` (tutte le challenge dell'anno), `GetBooksForMissingLetters`, `ProposeAlphabetChallenge` | **fatto** (2026-11-03). La `CompetitiveChallenge` è rimandata alla fase 5 perché richiede i dati di Fra |
+| 2 | Consigli dai libri "da leggere" + profilo dei gusti + libri abbandonati | da fare |
+| 3 | Fonti esterne: metadati (Open Library/Google Books), poi ricerche web su siti scelti | da fare |
+| 4 | Proattività: processo settimanale, sezione "suggerimenti" nell'app, impostazione per spegnerla | da fare |
+| 5a | Sfida competitiva: `CompetitiveChallenge`, `Reader`/`ReaderBook`, lista con punti; dalla chat (con conferma) si crea la sfida, si aggiungono libri alla lista e letture di Fra; import CSV di Fra in `/books`; strumenti `GetReaderYearSummary`, `GetCatchUpOptions` (piano "goloso" per superarla con meno pagine) | **fatto** (2026-11-04, provato via API con dati di prova poi cancellati) |
+| 5b | Grafici: statistiche tue e di Fra a confronto (pagina dedicata) | da fare |
+| V | **Data visualization e Home** (§12.7): percorso separato, indipendente dall'agente Libri | da fare |
+| — | Già fatto prima della specifica: agente con 4 strumenti (riepilogo annuale, libri per stato, avanzamento challenge a numero, salva obiettivo), pagina `/chat` con memoria della conversazione | fatto (§11) |
+
+### 12.6 Punti aperti (da decidere prima della fase 1)
+
+- **Modello dati delle challenge:** una tabella `Challenge` con tipo e regole (in JSON o campi) più una tabella di collegamento con i libri/punteggi? Come si rappresenta l'altra persona della sfida competitiva e le sue statistiche (inserite a mano? CSV suo?).
+- **Pulsante Conferma:** come si salvano le proposte in sospeso (tabella `PendingAction`?) e come la chat le mostra.
+- ~~**Un autore per lettera**~~ → deciso il 2026-11-03: iniziale del **cognome** (da "Author l-f" di Goodreads), **26 lettere A-Z**, accenti ignorati.
+- **Costi:** le ricerche web e i prospetti lunghi consumano molti token; fissare un limite mensile in console Anthropic e valutare un modello più capace solo dove serve.
+- ~~**Dati di Fra**~~ → deciso il 2026-11-04: **chat + CSV** di Goodreads; punteggio **per libro** (1–100, deciso quando lo si aggiunge); durata **anno solare**; la lista vive in `ChallengeListItems`.
+- ~~**Ereditarietà EF**~~ → deciso il 2026-11-03: **tabella unica (TPH)**, perché le challenge hanno pochi campi specifici; si può passare a tabelle separate con una migrazione se diventasse scomoda.
+
+### 12.7 Data visualization e Home "recap della vita" (discorso separato)
+
+- **Obiettivo:** una **Home** che dà un recap della vita: sezioni per libri, sport, cibo, sociale, studio, con **grafici e tabelle**. Da sviluppare prima o dopo l'agente Libri: le due cose sono indipendenti.
+- **Libri (primo candidato):** libri letti per mese/anno, pagine, voti, avanzamento challenge, confronto con Fra.
+- **Altri ambiti:** si aggiungono quando esistono i dati (cibo, ciclo, studio…); attenzione ai dati sensibili (#11) solo se passano dall'IA: i grafici sono calcolati dal codice e non richiedono l'IA.
+- **Da decidere:** libreria grafici per Blazor WebAssembly (nessun JavaScript a mano, vedi §6.1: valutare librerie .NET come ApexCharts.Blazor o MudBlazor, oppure SVG scritto in Razor); endpoint API dedicati di sola lettura (`/api/stats/...`).

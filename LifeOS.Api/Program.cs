@@ -45,9 +45,17 @@ builder.Services.AddSingleton<IChatClient>(_ =>
     var model = builder.Configuration["Anthropic:Model"]
         ?? throw new InvalidOperationException("Manca 'Anthropic:Model' in appsettings.json.");
 
+    // Limite di token in uscita per ogni risposta (ragionamento interno del modello + testo).
+    // Il predefinito della libreria è basso (circa 1000): con domande lunghe (es. un prospetto) il
+    // modello esauriva il limite ragionando e la risposta arrivava vuota o tagliata (CLAUDE.md §9 #18).
+    var maxTokens = builder.Configuration.GetValue("Anthropic:MaxOutputTokens", 8000);
+
     // AsIChatClient adatta il client Anthropic all'interfaccia standard IChatClient.
-    return new AnthropicClient { ApiKey = apiKey }.AsIChatClient(model);
+    return new AnthropicClient { ApiKey = apiKey }.AsIChatClient(model, maxTokens);
 });
+
+// Servizio delle modifiche proposte dagli agenti e confermate dall'utente (Services/PendingActionService.cs).
+builder.Services.AddScoped<PendingActionService>();
 
 // Agente Libri (Agents/BookAgent.cs). "Scoped" come il database che usa: uno per richiesta.
 builder.Services.AddScoped<BookAgent>();
@@ -91,6 +99,12 @@ app.UseCors("Frontend");
 // ─── ENDPOINT ───────────────────────────────────────────────────────────────────
 // Libri: GET, POST e import CSV su /api/books (definiti in Endpoints/BookEndpoints.cs).
 app.MapBookEndpoints();
+
+// Altre persone che leggono (es. Fra): elenco e import del loro CSV, /api/readers (Endpoints/ReaderEndpoints.cs).
+app.MapReaderEndpoints();
+
+// Conferma/rifiuto delle modifiche proposte dagli agenti: /api/pending (Endpoints/PendingEndpoints.cs).
+app.MapPendingEndpoints();
 
 // IA: prova di collegamento con Claude su /api/ping-ai (temporanea, Endpoints/AiEndpoints.cs).
 app.MapAiEndpoints();

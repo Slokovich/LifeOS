@@ -53,6 +53,26 @@
     }
 </div>
 
+@* ─── Import del CSV di un'altra persona (es. Fra, per la sfida competitiva) ─── *@
+<div class="mb-4">
+    <label class="form-label">Importa il CSV di Goodreads di un'altra persona</label>
+    <div class="row g-2">
+        <div class="col-sm-3">
+            <input class="form-control" placeholder="Nome" @bind="readerName" disabled="@importing" />
+        </div>
+        <div class="col-sm-9">
+            <InputFile class="form-control" accept=".csv" OnChange="ImportReaderCsvAsync" disabled="@(importing || string.IsNullOrWhiteSpace(readerName))" />
+        </div>
+    </div>
+    @if (readerImportResult is not null)
+    {
+        <div class="alert alert-success mt-2">
+            Libri di @readerName: @readerImportResult.Added aggiunti, @readerImportResult.Updated aggiornati,
+            @readerImportResult.Skipped saltati.
+        </div>
+    }
+</div>
+
 @* Messaggio d'errore (visibile solo se c'è un errore). *@
 @if (error is not null)
 {
@@ -153,11 +173,28 @@ else
     private ImportResultItem? importResult;
     private bool importing;
 
-    // Parte quando scegli un file: lo invia all'API (POST /api/books/import) e ricarica l'elenco.
+    // Nome della persona per l'import del suo CSV e riepilogo del suo ultimo import.
+    private string readerName = "Fra";
+    private ImportResultItem? readerImportResult;
+
+    // Parte quando scegli il TUO file: lo invia all'API (POST /api/books/import) e ricarica l'elenco.
     private async Task ImportCsvAsync(InputFileChangeEventArgs e)
+    {
+        importResult = await UploadCsvAsync(e, "api/books/import");
+        if (importResult is not null) await LoadBooksAsync(); // mostra subito i libri importati
+    }
+
+    // Parte quando scegli il file di un'ALTRA persona: POST /api/readers/{nome}/import.
+    // I suoi libri non compaiono nell'elenco qui sotto (che mostra solo i tuoi).
+    private async Task ImportReaderCsvAsync(InputFileChangeEventArgs e) =>
+        readerImportResult = await UploadCsvAsync(e, $"api/readers/{Uri.EscapeDataString(readerName.Trim())}/import");
+
+    // Invia il CSV all'indirizzo indicato e restituisce il riepilogo (null se qualcosa è andato storto).
+    private async Task<ImportResultItem?> UploadCsvAsync(InputFileChangeEventArgs e, string url)
     {
         importing = true;
         importResult = null;
+        readerImportResult = null;
         error = null;
         try
         {
@@ -166,16 +203,15 @@ else
             using var stream = e.File.OpenReadStream(MaxCsvBytes);
             content.Add(new StreamContent(stream), "file", e.File.Name);
 
-            var response = await Http.PostAsync("api/books/import", content);
+            var response = await Http.PostAsync(url, content);
             if (!response.IsSuccessStatusCode)
             {
                 // L'API spiega il motivo nel corpo della risposta (es. "Il file è vuoto.").
                 error = $"Import non riuscito: {await response.Content.ReadAsStringAsync()}";
-                return;
+                return null;
             }
 
-            importResult = await response.Content.ReadFromJsonAsync<ImportResultItem>();
-            await LoadBooksAsync(); // mostra subito i libri importati
+            return await response.Content.ReadFromJsonAsync<ImportResultItem>();
         }
         catch (HttpRequestException)
         {
@@ -190,6 +226,7 @@ else
         {
             importing = false;
         }
+        return null; // si arriva qui solo dopo un errore
     }
 
     // Traduce il valore dell'enum (inglese) nel testo italiano mostrato all'utente.
